@@ -8390,29 +8390,19 @@ void Aura::HandleAuraControlVehicle(bool apply, bool Real)
     if (!target->IsVehicle())
         return;
 
-    // TODO: Check for free seat
-
     Unit* caster = GetCaster();
     if (!caster)
         return;
 
-    if (apply)
-    {
-        if (caster->GetTypeId() == TYPEID_PLAYER)
-            ((Player*)caster)->RemovePet(PET_SAVE_AS_CURRENT);
-
-        // caster->EnterVehicle(target);
-    }
-    else
+    if (!apply)
     {
         // some SPELL_AURA_CONTROL_VEHICLE auras have a dummy effect on the player - remove them
         caster->RemoveAurasDueToSpell(GetId());
 
-        // caster->ExitVehicle();
-
-        if (caster->GetTypeId() == TYPEID_PLAYER)
-            ((Player*)caster)->ResummonPetTemporaryUnSummonedIfAny();
+        target->GetVehicleInfo()->Unboard(caster);
     }
+    else
+        target->GetVehicleInfo()->Board(caster, GetSpellProto()->CalculateSimpleValue(m_effIndex) - 1);
 }
 
 void Aura::HandleAuraAddMechanicAbilities(bool apply, bool Real)

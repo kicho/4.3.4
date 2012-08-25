@@ -21,19 +21,44 @@
 
 #include "Common.h"
 #include "ObjectGuid.h"
-#include "Creature.h"
-#include "Unit.h"
+#include "TransportSystem.h"
 #include "SharedDefines.h"
 
-struct VehicleEntry;
+class Unit;
 
-class VehicleInfo
+struct VehicleEntry;
+struct VehicleSeatEntry;
+
+typedef UNORDERED_MAP<uint8, VehicleSeatEntry const*> VehicleSeatMap;
+
+class VehicleInfo : public TransportBase
 {
-        VehicleEntry const* m_vehicleEntry;
     public:
-        explicit VehicleInfo(VehicleEntry const* entry);
+        explicit VehicleInfo(Unit* owner, VehicleEntry const* entry);
+
+        void Board(Unit* passenger, uint8 seat = 0);
+        void Unboard(Unit* passenger);
 
         VehicleEntry const* GetEntry() const { return m_vehicleEntry; }
+        VehicleSeatEntry const* GetSeatEntry(uint8 seat) const;
+
+        bool CanBoard(Unit* passenger);
+        bool GetUsableSeatFor(Unit* passenger, uint8& seat);
+
+        bool IsUsableSeatForPlayer(uint32 seatFlags) { return seatFlags & SEAT_FLAG_USABLE; }
+        bool IsUsableSeatForCreature(uint32 seatFlags) { return true; /* return !IsUsableSeatForPlayer(seatFlags); */ }
+
+        uint8 GetTakenSeatsMask();
+        uint8 GetEmptySeatsMask() { return ~GetTakenSeatsMask(); }
+        uint8 GetEmptySeats() { return m_vehicleSeats.size() - m_passengers.size(); }
+
+    private:
+        void CalculateBoardingPositionOf(float gx, float gy, float gz, float go, float &lx, float &ly, float &lz, float &lo);
+
+        VehicleEntry const* m_vehicleEntry;
+        VehicleSeatMap m_vehicleSeats;
+        uint8 m_creatureSeats;
+        uint8 m_playerSeats;
 };
 
 #endif

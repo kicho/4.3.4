@@ -178,8 +178,8 @@ namespace Movement
         STR(Enter_Cycle),  // 0x00100000,           // Everytime Appears With Cyclic Flag In Monster Move Packet
         STR(Animation),    // 0x00200000,           // Animationid (0...3), Uint32 Time, Not Compartible With Trajectory And Fall Movement
         STR(Unknown4),     // 0x00400000,           // Disables Movement By Path
-        STR(Unknown5),     // 0x00800000,
-        STR(Unknown6),     // 0x01000000,
+        STR(BoardVehicle), // 0x00800000,
+        STR(ExitVehicle),  // 0x01000000,
         STR(Unknown7),     // 0x02000000,
         STR(Unknown8),     // 0x04000000,
         STR(OrientationInversed), // 0x08000000,           // Appears With Runmode Flag, Nodes ),// 1, Handles Orientation

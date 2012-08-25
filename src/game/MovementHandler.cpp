@@ -23,7 +23,6 @@
 #include "Log.h"
 #include "Corpse.h"
 #include "Player.h"
-#include "Vehicle.h"
 #include "SpellAuras.h"
 #include "MapManager.h"
 #include "Transports.h"

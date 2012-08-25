@@ -44,6 +44,7 @@
 #include "BattleGround.h"
 #include "Util.h"
 #include "Chat.h"
+#include "Vehicle.h"
 
 extern pEffect SpellEffects[TOTAL_SPELL_EFFECTS];
 
@@ -5962,6 +5963,22 @@ SpellCastResult Spell::CheckCast(bool strict)
                     return SPELL_FAILED_BAD_TARGETS;
 
                 break;
+            }
+            case SPELL_AURA_CONTROL_VEHICLE:
+            {
+                if (m_caster->HasAuraType(SPELL_AURA_MOUNTED))
+                    return SPELL_FAILED_NOT_MOUNTED;
+
+                if (m_caster->HasAuraType(SPELL_AURA_CONTROL_VEHICLE))
+                    return SPELL_FAILED_NOT_ON_TRANSPORT;
+
+                Unit* pTarget = m_targets.getUnitTarget();
+
+                if (!pTarget->IsVehicle())
+                    return SPELL_FAILED_BAD_TARGETS;
+
+                if (!pTarget->GetVehicleInfo()->CanBoard(m_caster))
+                    return SPELL_FAILED_BAD_TARGETS;
             }
             case SPELL_AURA_MIRROR_IMAGE:
             {

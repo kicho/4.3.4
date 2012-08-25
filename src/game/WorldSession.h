@@ -514,8 +514,12 @@ class MANGOS_DLL_SPEC WorldSession
         void HandleMovementOpcodes(WorldPacket& recvPacket);
         void HandleSetActiveMoverOpcode(WorldPacket& recv_data);
         void HandleMoveNotActiveMoverOpcode(WorldPacket& recv_data);
-        void HandleDismissControlledVehicle(WorldPacket& recv_data);
         void HandleMoveTimeSkippedOpcode(WorldPacket& recv_data);
+
+        void HandleDismissControlledVehicleOpcode(WorldPacket& recvPacket);
+        void HandleRequestVehicleExitOpcode(WorldPacket& recvPacket);
+        void HandleRequestVehicleSwitchSeatOpcode(WorldPacket& recvPacket);
+        void HandleChangeSeatsOnControlledVehicleOpcode(WorldPacket& recvPacket);
 
         void HandleRequestRaidInfoOpcode(WorldPacket& recv_data);
 

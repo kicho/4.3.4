@@ -350,6 +350,10 @@ void Unit::Update(uint32 update_diff, uint32 p_time)
         setAttackTimer(OFF_ATTACK, (update_diff >= base_att ? 0 : base_att - update_diff));
     }
 
+    // Update passenger positions if we are the first vehicle
+    if (IsVehicle() && !IsBoarded())
+        m_vehicleInfo->Update(update_diff);
+
     // update abilities available only for fraction of time
     UpdateReactives(update_diff);
 
@@ -4099,6 +4103,8 @@ bool Unit::AddSpellAuraHolder(SpellAuraHolder* holder)
                     case SPELL_AURA_PERIODIC_MANA_LEECH:
                     case SPELL_AURA_OBS_MOD_MANA:
                     case SPELL_AURA_POWER_BURN_MANA:
+                    case SPELL_AURA_CONTROL_VEHICLE:
+                    case SPELL_AURA_284: // SPELL_AURA_LINKED_AURA
                         break;
                     case SPELL_AURA_PERIODIC_ENERGIZE:      // all or self or clear non-stackable
                     default:                                // not allow
@@ -10978,7 +10984,7 @@ void Unit::SetVehicleId(uint32 entry)
         VehicleEntry const* ventry = sVehicleStore.LookupEntry(entry);
         MANGOS_ASSERT(ventry != NULL);
 
-        m_vehicleInfo = new VehicleInfo(ventry);
+        m_vehicleInfo = new VehicleInfo(this, ventry);
         m_updateFlag |= UPDATEFLAG_VEHICLE;
     }
     else
@@ -11018,7 +11024,9 @@ void Unit::UpdateSplineMovement(uint32 t_diff)
         m_movesplineTimer.Reset(POSITION_UPDATE_DELAY);
         Movement::Location loc = movespline->ComputePosition();
 
-        if (GetTypeId() == TYPEID_PLAYER)
+        if (m_transportInfo)
+            m_transportInfo->SetLocalPosition(loc.x, loc.y, loc.z, loc.orientation);
+        else if (GetTypeId() == TYPEID_PLAYER)
             ((Player*)this)->SetPosition(loc.x, loc.y, loc.z, loc.orientation);
         else
             GetMap()->CreatureRelocation((Creature*)this, loc.x, loc.y, loc.z, loc.orientation);
