@@ -90,7 +90,7 @@ enum MangosStrings
     LANG_GM_NO_WHISPER                  = 64,
     LANG_USING_SCRIPT_LIB_UNKNOWN       = 65,
     LANG_USING_SCRIPT_LIB_NONE          = 66,
-	//announce modification
+	//custom modifications
 	LANG_SYSTEMMESSAGE_MODERATOR        = 67,
 	LANG_SYSTEMMESSAGE_GAMEMASTER       = 68,
 	LANG_SYSTEMMESSAGE_ADMINISTRATOR    = 69,
@@ -99,7 +99,8 @@ enum MangosStrings
 	LANG_SYSTEMMESSAGE_CONSOLE          = 72,
 	LANG_BAN_WORLD_ANNOUNCE             = 73,
 	LANG_PERMBAN_WORLD_ANNOUNCE         = 74,
-    // Room for more level 0              74-99 not used
+	LANG_AUTO_BROADCAST					= 75,
+    // Room for more level 0              76-99 not used
 
     // level 1 chat
     LANG_GLOBAL_NOTIFY                  = 100,
