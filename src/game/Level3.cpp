@@ -504,19 +504,6 @@ bool ChatHandler::HandleReloadQuestAreaTriggersCommand(char* /*args*/)
 
 bool ChatHandler::HandleReloadQuestTemplateCommand(char* /*args*/)
 {
-    sLog.outString("Re-Loading Quest Templates...");
-    sObjectMgr.LoadQuests();
-    SendGlobalSysMessage("DB table `quest_template` (quest definitions) reloaded.");
-
-    /// dependent also from `gameobject` but this table not reloaded anyway
-    sLog.outString("Re-Loading GameObjects for quests...");
-    sObjectMgr.LoadGameObjectForQuests();
-    SendGlobalSysMessage("Data GameObjects for quests reloaded.");
-    return true;
-}
-
-bool ChatHandler::HandleReloadQuestTemplateCommand(char* /*args*/)
-{
     sLog.outString( "Re-Loading Quest Templates..." );
     sObjectMgr.LoadQuests();
     SendGlobalSysMessage("DB table `quest_template` (quest definitions) reloaded.");

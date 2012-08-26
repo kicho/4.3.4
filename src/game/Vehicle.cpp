@@ -99,7 +99,7 @@ void VehicleInfo::Board(Unit* passenger, uint8 seat)
     passenger->SetTransportInfo(transportInfo);
 
     // To players this is set automatically, somewhere
-    passenger->m_movementInfo.AddMovementFlag(MOVEFLAG_ONTRANSPORT);
+    //passenger->m_movementInfo.AddMovementFlag(MOVEFLAG_ONTRANSPORT);
 
     if (passenger->GetTypeId() == TYPEID_PLAYER)
     {
@@ -180,7 +180,7 @@ void VehicleInfo::Unboard(Unit* passenger)
     passenger->SetTransportInfo(NULL);
 
     // Update movementInfo
-    passenger->m_movementInfo.RemoveMovementFlag(MOVEFLAG_ONTRANSPORT);
+    //passenger->m_movementInfo.RemoveMovementFlag(MOVEFLAG_ONTRANSPORT);
 
     if (passenger->GetTypeId() == TYPEID_PLAYER)
     {
@@ -289,5 +289,5 @@ void VehicleInfo::CalculateBoardingPositionOf(float gx, float gy, float gz, floa
     NormalizeRotatedPosition(gx - m_owner->GetPositionX(), gy - m_owner->GetPositionY(), lx, ly);
 
     lz = gz - m_owner->GetPositionZ();
-    lo = MapManager::NormalizeOrientation(go - m_owner->GetOrientation());
+    lo = /*MapManager::*/NormalizeOrientation(go - m_owner->GetOrientation());
 }
