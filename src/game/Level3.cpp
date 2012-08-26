@@ -537,7 +537,7 @@ bool ChatHandler::HandleReloadGameobjectTemplateCommand(char* /*args*/)
 {
     sLog.outString( "Re-Loading Gameobject Templates..." );
 	SendGlobalSysMessage("Initialized reload of table 'gameobject_template', server might experience some lag.");
-    sObjectMgr.LoadGameobjects();
+    sObjectMgr.LoadGameObjects();
     SendGlobalSysMessage("Table `gameobject_template` reloaded successfully.");
     return true;
 }
