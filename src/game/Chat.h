@@ -458,6 +458,10 @@ class MANGOS_DLL_SPEC ChatHandler
         bool HandleReloadQuestPOICommand(char* args);
         bool HandleReloadQuestStartScriptsCommand(char* args);
         bool HandleReloadQuestTemplateCommand(char* args);
+		bool HandleReloadCreatureTemplateCommand(char* args);
+		bool HandleReloadItemTemplateCommand(char* args);
+		bool HandleReloadGameobjectTemplateCommand(char* args);
+		bool HandleReloadCreatureAddonsCommand(char* args);
         bool HandleReloadReservedNameCommand(char* args);
         bool HandleReloadReputationRewardRateCommand(char* args);
         bool HandleReloadReputationSpilloverTemplateCommand(char* args);
@@ -478,7 +482,7 @@ class MANGOS_DLL_SPEC ChatHandler
         bool HandleReloadSpellPetAurasCommand(char* args);
 
         bool HandleResetAchievementsCommand(char* args);
-        bool HandleResetAllCommand(char* args);
+        //bool HandleResetAllCommand(char* args);
         bool HandleResetHonorCommand(char* args);
         bool HandleResetLevelCommand(char* args);
         bool HandleResetSpecsCommand(char* args);
