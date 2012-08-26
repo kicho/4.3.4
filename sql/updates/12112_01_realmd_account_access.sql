@@ -1,4 +1,4 @@
-ALTER TABLE realmd_db_version CHANGE COLUMN required_0001_xxxxx_01_realmd required_0014_xxxxx_01_realmd_account_access bit;
+ALTER TABLE realmd_db_version CHANGE COLUMN required_10008_01_realmd_realmd_db_version required_12112_01_realmd_account_access bit;
 
 ALTER TABLE `account` DROP `gmlevel`;
 

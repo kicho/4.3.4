@@ -1,4 +1,4 @@
-ALTER TABLE db_version CHANGE COLUMN required_0083_12090_01_mangos_spell_template required_0114_xxxxx_01_mangos_item_template bit;
+ALTER TABLE db_version CHANGE COLUMN required_12012_01_mangos_spell_template required_12112_01_mangos_item_template bit;
 
 ALTER TABLE `item_template` ADD COLUMN `Unknown` float NOT NULL AFTER `Flags2`;
 ALTER TABLE `item_template` ADD COLUMN `Unknown1` float NOT NULL AFTER `Unknown`;
@@ -23,7 +23,7 @@ ALTER TABLE `item_template` ADD COLUMN `stat_unk1_9` int(10) NOT NULL DEFAULT '0
 ALTER TABLE `item_template` ADD COLUMN `stat_unk2_9` int(10) NOT NULL DEFAULT '0' AFTER `stat_unk1_9`;
 ALTER TABLE `item_template` ADD COLUMN `stat_unk1_10` int(10) NOT NULL DEFAULT '0' AFTER `stat_value10`;
 ALTER TABLE `item_template` ADD COLUMN `stat_unk2_10` int(10) NOT NULL DEFAULT '0' AFTER `stat_unk1_10`;
-ALTER TABLE `item_template` ADD COLUMN `DamageType` tinyint(3) unsigned NOT NULL DEFAULT '0' AFTER `ammo_type`;
+ALTER TABLE `item_template` ADD COLUMN `DamageType` tinyint(3) unsigned NOT NULL DEFAULT '0' AFTER `ScalingStatDistribution`;
 ALTER TABLE `item_template` ADD COLUMN `StatScalingFactor` float NOT NULL AFTER `FoodType`;
 ALTER TABLE `item_template` ADD COLUMN `Unknown400_1` int(10) unsigned NOT NULL DEFAULT '0' AFTER `StatScalingFactor`;
 ALTER TABLE `item_template` ADD COLUMN `Unknown400_2` int(10) unsigned NOT NULL DEFAULT '0' AFTER `Unknown400_1`;

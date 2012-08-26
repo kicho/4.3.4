@@ -1042,8 +1042,6 @@
     <ClInclude Include="..\..\src\game\CreatureLinkingMgr.h">
       <Filter>World/Handlers</Filter>
     </ClInclude>
-<<<<<<< HEAD
-=======
     <ClInclude Include="..\..\src\game\DB2fmt.h">
       <Filter>Server</Filter>
     </ClInclude>
@@ -1053,7 +1051,6 @@
     <ClInclude Include="..\..\src\game\DB2Structure.h">
       <Filter>Server</Filter>
     </ClInclude>
->>>>>>> 217c4af46d58fea6647af9475d7d35c60c6a1377
     <ClInclude Include="..\..\src\game\TransportSystem.h">
       <Filter>Object</Filter>
     </ClInclude>

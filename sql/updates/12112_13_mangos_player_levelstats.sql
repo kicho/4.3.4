@@ -1,4 +1,4 @@
-ALTER TABLE db_version CHANGE COLUMN required_0156_xxxxx_03_mangos_playercreateinfo_spell required_0157_xxxxx_01_mangos_player_levelstats bit;
+ALTER TABLE db_version CHANGE COLUMN required_12112_12_mangos_playercreateinfo_spell required_12112_13_mangos_player_levelstats bit;
 
 DELETE FROM `player_levelstats` WHERE `race` BETWEEN 1 AND 22;
 
@@ -6836,5 +6836,3 @@ INSERT INTO `player_levelstats` VALUES
 (22,11,83,124,107,130,168,215),
 (22,11,84,134,117,140,178,225),
 (22,11,85,144,127,150,188,235);
-/*!40000 ALTER TABLE `player_levelstats` ENABLE KEYS */;
-UNLOCK TABLES;

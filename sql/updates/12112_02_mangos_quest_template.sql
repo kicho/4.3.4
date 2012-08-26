@@ -1,4 +1,4 @@
-ALTER TABLE db_version CHANGE COLUMN required_0157_xxxxx_01_mangos_player_levelstats required_0159_xxxxx_01_mangos_quest_template bit;
+ALTER TABLE db_version CHANGE COLUMN required_12112_01_mangos_item_template required_12112_02_mangos_quest_template bit;
 
 ALTER TABLE `quest_template` MODIFY COLUMN `RequiredRaces` int(7) unsigned NOT NULL DEFAULT '0';
 

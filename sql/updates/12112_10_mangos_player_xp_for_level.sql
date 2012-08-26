@@ -1,4 +1,4 @@
-ALTER TABLE db_version CHANGE COLUMN required_0040_xxxxx_01_mangos_playercreateinfo required_0046_xxxxx_01_mangos_player_xp_for_level bit;
+ALTER TABLE db_version CHANGE COLUMN required_12112_09_mangos_playercreateinfo required_12112_10_mangos_player_xp_for_level bit;
 
 DELETE FROM `player_xp_for_level` WHERE `lvl` BETWEEN 70 AND 84;
 

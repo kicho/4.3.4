@@ -1,4 +1,4 @@
-ALTER TABLE db_version CHANGE COLUMN required_0155_xxxxx_02_mangos_playercreateinfo_action required_0156_xxxxx_01_mangos_playercreateinfo_action bit;
+ALTER TABLE db_version CHANGE COLUMN required_12112_10_mangos_player_xp_for_level required_12112_11_mangos_playercreateinfo_action bit;
 
 DELETE FROM `playercreateinfo_action` WHERE `race` BETWEEN 1 AND 22;
 

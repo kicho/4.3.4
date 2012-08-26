@@ -20,20 +20,6 @@
 
 void BitStream::Clear()
 {
-    /*char const* traceStr;
-
-#ifdef HAVE_ACE_STACK_TRACE_H
-    ACE_Stack_Trace trace;
-    traceStr = trace.c_str();
-#else
-    traceStr = NULL;
-#endif
-
-    sLog.outError(
-        "Attempted to %s in ByteBuffer (pos: " SIZEFMTD " size: " SIZEFMTD ") "
-        "value with size: " SIZEFMTD "%s%s",
-        (add ? "put" : "get"), pos, size, esize,
-        traceStr ? "\n" : "", traceStr ? traceStr : "");*/
     _data.clear();
     _rpos = _wpos = 0;
 }
@@ -89,10 +75,3 @@ void BitStream::Print()
     sLog.outDebug(ss.str().c_str());
 }
 
-ByteBuffer::ByteBuffer(size_t res, bool init): _rpos(0), _wpos(0), _bitpos(8), _curbitval(0)
-{
-    if (init)
-        _storage.resize(res, 0);
-    else
-        _storage.reserve(res);
-}

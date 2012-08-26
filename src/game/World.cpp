@@ -1702,7 +1702,6 @@ void World::SendGlobalMessage(WorldPacket* packet)
     }
 }
 
-
 /// Sends a server message to the specified or all players
 void World::SendServerMessage(ServerMessageType type, const char* text /*=""*/, Player* player /*= NULL*/)
 {

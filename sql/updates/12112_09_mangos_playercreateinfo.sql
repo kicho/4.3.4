@@ -1,4 +1,7 @@
-ALTER TABLE db_version CHANGE COLUMN required_0156_xxxxx_01_mangos_playercreateinfo_action  required_0156_xxxxx_02_mangos_playercreateinfo bit;
+ALTER TABLE db_version CHANGE COLUMN required_12112_08_mangos_player_classlevelstats required_12112_09_mangos_playercreateinfo bit;
+
+ALTER TABLE `playercreateinfo`
+ADD COLUMN `phaseMap` INT(11) UNSIGNED NOT NULL DEFAULT '0' AFTER `orientation`;
 
 DELETE FROM `playercreateinfo` WHERE `race` BETWEEN 1 AND 22;
 

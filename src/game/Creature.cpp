@@ -2636,27 +2636,3 @@ void Creature::SetWaterWalk(bool enable)
         SendMessageToSet(&data, true);
     }
 }
-
-void Creature::SetRoot(bool enable)
-{
-    if (enable)
-        m_movementInfo.AddMovementFlag(MOVEFLAG_ROOT);
-    else
-        m_movementInfo.RemoveMovementFlag(MOVEFLAG_ROOT);
-
-    WorldPacket data(enable ? SMSG_SPLINE_MOVE_ROOT : SMSG_SPLINE_MOVE_UNROOT, 9);
-    data << GetPackGUID();
-    SendMessageToSet(&data, true);
-}
-
-void Creature::SetWaterWalk(bool enable)
-{
-    if (enable)
-        m_movementInfo.AddMovementFlag(MOVEFLAG_WATERWALKING);
-    else
-        m_movementInfo.RemoveMovementFlag(MOVEFLAG_WATERWALKING);
-
-    WorldPacket data(enable ? SMSG_SPLINE_MOVE_WATER_WALK : SMSG_SPLINE_MOVE_LAND_WALK, 9);
-    data << GetPackGUID();
-    SendMessageToSet(&data, true);
-}

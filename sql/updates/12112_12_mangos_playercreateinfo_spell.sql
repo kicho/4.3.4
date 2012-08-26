@@ -1,4 +1,4 @@
-ALTER TABLE db_version CHANGE COLUMN required_0156_xxxxx_02_mangos_playercreateinfo required_0156_xxxxx_03_mangos_playercreateinfo_spell bit;
+ALTER TABLE db_version CHANGE COLUMN required_12112_11_mangos_playercreateinfo_action required_12112_12_mangos_playercreateinfo_spell bit;
 
 DELETE FROM `playercreateinfo_spell` WHERE `race` BETWEEN 1 AND 22;
 
@@ -4717,7 +4717,6 @@ INSERT INTO `playercreateinfo_spell` VALUES
 (22,1,96220,'Opening'),
 (22,1,203,'Unarmed'),
 (22,1,79742,'Languages'),
-(22,1,69001,''),
 (22,1,49410,'Forceful Deflection'),
 (22,1,199,'Two-Handed Maces'),
 (22,1,15590,'Fist Weapons'),
@@ -4778,7 +4777,6 @@ INSERT INTO `playercreateinfo_spell` VALUES
 (22,3,883,'Call Pet 1'),
 (22,3,982,'Revive Pet'),
 (22,3,79742,'Languages'),
-(22,3,69001,''),
 (22,3,15590,'Fist Weapons'),
 (22,3,200,'Polearms'),
 (22,3,668,'Language Common'),
@@ -4828,7 +4826,6 @@ INSERT INTO `playercreateinfo_spell` VALUES
 (22,4,96220,'Opening'),
 (22,4,203,'Unarmed'),
 (22,4,79742,'Languages'),
-(22,4,69001,''),
 (22,4,15590,'Fist Weapons'),
 (22,4,76273,'Armor Skills'),
 (22,4,76297,'Weapon Skills'),
@@ -4877,7 +4874,6 @@ INSERT INTO `playercreateinfo_spell` VALUES
 (22,5,88684,'Holy Word: Serenity'),
 (22,5,101062,'Flash Heal'),
 (22,5,79742,'Languages'),
-(22,5,69001,''),
 (22,5,76301,'Weapon Skills'),
 (22,5,76279,'Armor Skills'),
 (22,5,84734,'Dark Thoughts'),
@@ -4918,7 +4914,6 @@ INSERT INTO `playercreateinfo_spell` VALUES
 (22,8,79684,'Offensive State (DND)'),
 (22,8,203,'Unarmed'),
 (22,8,79742,'Languages'),
-(22,8,69001,''),
 (22,8,133,'Fireball'),
 (22,8,92315,'Pyroblast!'),
 (22,8,85801,'DPS Caster Crit Damage Bonus'),
@@ -4958,7 +4953,6 @@ INSERT INTO `playercreateinfo_spell` VALUES
 (22,9,96220,'Opening'),
 (22,9,203,'Unarmed'),
 (22,9,79742,'Languages'),
-(22,9,69001,''),
 (22,9,688,'Summon Imp'),
 (22,9,86213,'Soul Swap Exhale'),
 (22,9,89420,'Drain Life'),
@@ -5001,7 +4995,6 @@ INSERT INTO `playercreateinfo_spell` VALUES
 (22,11,96220,'Opening'),
 (22,11,203,'Unarmed'),
 (22,11,79742,'Languages'),
-(22,11,69001,''),
 (22,11,84736,'Nature\'s Focus'),
 (22,11,81170,'Ravage!'),
 (22,11,79577,'Eclipse Mastery Driver Passive'),
