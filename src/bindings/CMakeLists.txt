@@ -17,4 +17,4 @@
 #
 
 # add_subdirectory(universal)
-master
+add_subdirectory(master)
