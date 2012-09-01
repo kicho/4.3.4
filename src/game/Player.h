@@ -35,7 +35,7 @@
 #include "Util.h"                                           // for Tokens typedef
 #include "AchievementMgr.h"
 #include "ReputationMgr.h"
-#include "BattleGround.h"
+#include "BattleGround/BattleGround.h"
 #include "SharedDefines.h"
 
 #include<string>
@@ -87,6 +87,37 @@ enum BuyBankSlotResult
     ERR_BANKSLOT_OK                 = 3
 };
 
+enum PlayerCurrencyFlag
+{
+    PLAYERCURRENCY_FLAG_NONE                = 0x0,
+    PLAYERCURRENCY_FLAG_UNK1                = 0x1,  // unused?
+    PLAYERCURRENCY_FLAG_UNK2                = 0x2,  // unused?
+    PLAYERCURRENCY_FLAG_SHOW_IN_BACKPACK    = 0x4,
+    PLAYERCURRENCY_FLAG_UNUSED              = 0x8,
+
+    PLAYERCURRENCY_MASK_USED_BY_CLIENT =
+        PLAYERCURRENCY_FLAG_SHOW_IN_BACKPACK |
+        PLAYERCURRENCY_FLAG_UNUSED,
+};
+
+enum PlayerCurrencyState
+{
+    PLAYERCURRENCY_UNCHANGED        = 0,
+    PLAYERCURRENCY_CHANGED          = 1,
+    PLAYERCURRENCY_NEW              = 2,
+    PLAYERCURRENCY_REMOVED          = 3
+};
+
+struct PlayerCurrency
+{
+    PlayerCurrencyState state;
+    uint32 totalCount;
+    uint32 weekCount;
+    uint32 seasonCount;
+    uint8 flags;
+    CurrencyTypesEntry const * currencyEntry;
+};
+
 enum PlayerSpellState
 {
     PLAYERSPELL_UNCHANGED = 0,
@@ -110,6 +141,7 @@ struct PlayerTalent
     PlayerSpellState state;
 };
 
+typedef UNORDERED_MAP<uint32, PlayerCurrency> PlayerCurrenciesMap;
 typedef UNORDERED_MAP<uint32, PlayerSpell> PlayerSpellMap;
 typedef UNORDERED_MAP<uint32, PlayerTalent> PlayerTalentMap;
 
@@ -591,7 +623,7 @@ enum PlayerSlots
     // first slot for item stored (in any way in player m_items data)
     PLAYER_SLOT_START           = 0,
     // last+1 slot for item stored (in any way in player m_items data)
-    PLAYER_SLOT_END             = 150,
+    PLAYER_SLOT_END             = 86,
     PLAYER_SLOTS_COUNT          = (PLAYER_SLOT_END - PLAYER_SLOT_START)
 };
 
@@ -651,18 +683,6 @@ enum BuyBackSlots                                           // 12 slots
     // stored in m_buybackitems
     BUYBACK_SLOT_START          = 74,
     BUYBACK_SLOT_END            = 86
-};
-
-enum KeyRingSlots                                           // 32 slots
-{
-    KEYRING_SLOT_START          = 86,
-    KEYRING_SLOT_END            = 118
-};
-
-enum CurrencyTokenSlots                                     // 32 slots
-{
-    CURRENCYTOKEN_SLOT_START    = 118,
-    CURRENCYTOKEN_SLOT_END      = 150
 };
 
 enum EquipmentSetUpdateState
@@ -839,6 +859,7 @@ enum PlayerLoginQueryIndex
     PLAYER_LOGIN_QUERY_LOADTALENTS,
     PLAYER_LOGIN_QUERY_LOADWEEKLYQUESTSTATUS,
     PLAYER_LOGIN_QUERY_LOADMONTHLYQUESTSTATUS,
+    PLAYER_LOGIN_QUERY_LOADCURRENCIES,
 
     MAX_PLAYER_LOGIN_QUERY
 };
@@ -1214,7 +1235,6 @@ class MANGOS_DLL_SPEC Player : public Unit
         InventoryResult CanUnequipItem(uint16 src, bool swap) const;
         InventoryResult CanBankItem(uint8 bag, uint8 slot, ItemPosCountVec& dest, Item* pItem, bool swap, bool not_loading = true) const;
         InventoryResult CanUseItem(Item* pItem, bool direct_action = true) const;
-        bool HasItemTotemCategory(uint32 TotemCategory) const;
         InventoryResult CanUseItem(ItemPrototype const* pItem) const;
         InventoryResult CanUseAmmo(uint32 item) const;
         Item* StoreNewItem(ItemPosCountVec const& pos, uint32 item, bool update, int32 randomPropertyId = 0);
@@ -1265,7 +1285,6 @@ class MANGOS_DLL_SPEC Player : public Unit
 
         void TakeExtendedCost(uint32 extendedCostId, uint32 count);
 
-        uint32 GetMaxKeyringSize() const { return KEYRING_SLOT_END - KEYRING_SLOT_START; }
         void SendEquipError(InventoryResult msg, Item* pItem, Item* pItem2 = NULL, uint32 itemid = 0) const;
         void SendBuyError(BuyResult msg, Creature* pCreature, uint32 item, uint32 param);
         void SendSellError(SellResult msg, Creature* pCreature, ObjectGuid itemGuid, uint32 param);
@@ -1594,16 +1613,18 @@ class MANGOS_DLL_SPEC Player : public Unit
         void learnQuestRewardedSpells(Quest const* quest);
         void learnSpellHighRank(uint32 spellid);
 
-        uint32 GetFreeTalentPoints() const { return GetUInt32Value(PLAYER_CHARACTER_POINTS); }
-        void SetFreeTalentPoints(uint32 points) { SetUInt32Value(PLAYER_CHARACTER_POINTS, points); }
+        uint32 GetFreeTalentPoints() const { return m_freeTalentPoints; }
+        void SetFreeTalentPoints(uint32 points) { m_freeTalentPoints = points; }
         void UpdateFreeTalentPoints(bool resetIfNeed = true);
+        uint32 GetPrimaryTalentTree(uint8 spec) const { return m_talentsPrimaryTree[spec]; }
+        void SetPrimaryTalentTree(uint8 spec, uint32 tree) { m_talentsPrimaryTree[spec] = tree; }
         bool resetTalents(bool no_cost = false, bool all_specs = false);
         uint32 resetTalentsCost() const;
         void InitTalentForLevel();
         void BuildPlayerTalentsInfoData(WorldPacket* data);
         void BuildPetTalentsInfoData(WorldPacket* data);
         void SendTalentsInfoData(bool pet);
-        void LearnTalent(uint32 talentId, uint32 talentRank);
+        bool LearnTalent(uint32 talentId, uint32 talentRank);
         void LearnPetTalent(ObjectGuid petGuid, uint32 talentId, uint32 talentRank);
 
         uint32 CalculateTalentsPoints() const;
@@ -1618,7 +1639,7 @@ class MANGOS_DLL_SPEC Player : public Unit
 
         void InitGlyphsForLevel();
         void SetGlyphSlot(uint8 slot, uint32 slottype) { SetUInt32Value(PLAYER_FIELD_GLYPH_SLOTS_1 + slot, slottype); }
-        uint32 GetGlyphSlot(uint8 slot) { return GetUInt32Value(PLAYER_FIELD_GLYPH_SLOTS_1 + slot); }
+        uint32 GetGlyphSlot(uint8 slot) const { return GetUInt32Value(PLAYER_FIELD_GLYPH_SLOTS_1 + slot); }
         void SetGlyph(uint8 slot, uint32 glyph) { m_glyphs[m_activeSpec][slot].SetId(glyph); }
         uint32 GetGlyph(uint8 slot) { return m_glyphs[m_activeSpec][slot].GetId(); }
         void ApplyGlyph(uint8 slot, bool apply);
@@ -1952,17 +1973,26 @@ class MANGOS_DLL_SPEC Player : public Unit
         void ModifySkillBonus(uint32 skillid, int32 val, bool talent);
 
         /*********************************************************/
+        /***                CURRENCY SYSTEM                    ***/
+        /*********************************************************/
+        uint32 GetCurrencyCount(uint32 id) const;
+        uint32 GetCurrencySeasonCount(uint32 id) const;
+        uint32 GetCurrencyWeekCount(uint32 id) const;
+        void SendCurrencies() const;
+        void ModifyCurrencyCount(uint32 id, int32 count, bool modifyWeek = true, bool modifySeason = true);
+        bool HasCurrencyCount(uint32 id, uint32 count) const { return GetCurrencyCount(id) >= count; }
+        bool HasCurrencySeasonCount(uint32 id, uint32 count) const { return GetCurrencySeasonCount(id) >= count; }
+        void SetCurrencyCount(uint32 id, uint32 count);
+        void SendCurrencyWeekCap(uint32 id) const;
+        void SendCurrencyWeekCap(CurrencyTypesEntry const * currency) const;
+        void SetCurrencyFlags(uint32 currencyId, uint8 flags);
+        void ResetCurrencyWeekCounts();
+
+        /*********************************************************/
         /***                  PVP SYSTEM                       ***/
         /*********************************************************/
-        void UpdateArenaFields();
-        void UpdateHonorFields();
+        void UpdateHonorKills();
         bool RewardHonor(Unit *pVictim, uint32 groupsize, float honor = -1);
-        uint32 GetHonorPoints() { return m_honorPoints; }
-        uint32 GetArenaPoints() { return m_arenaPoints; }
-        void SetHonorPoints(uint32 honor);
-        void SetArenaPoints(uint32 arena);
-        void ModifyHonorPoints( int32 value );
-        void ModifyArenaPoints( int32 value );
 
         uint32 GetMaxPersonalArenaRatingRequirement(uint32 minarenaslot);
 
@@ -2146,14 +2176,9 @@ class MANGOS_DLL_SPEC Player : public Unit
         bool GetBGAccessByLevel(BattleGroundTypeId bgTypeId) const;
         bool CanUseBattleGroundObject();
         bool isTotalImmune();
+
+        // returns true if the player is in active state for capture point capturing
         bool CanUseCapturePoint();
-
-        /*********************************************************/
-        /***                OUTDOOR PVP SYSTEM                 ***/
-        /*********************************************************/
-
-        // returns true if the player is in active state for outdoor pvp objective capturing
-        bool CanUseOutdoorCapturePoint();
 
         /*********************************************************/
         /***                    REST SYSTEM                    ***/
@@ -2443,11 +2468,13 @@ class MANGOS_DLL_SPEC Player : public Unit
         int32 getMaxTimer(MirrorTimerType timer);
 
         /*********************************************************/
-        /***                  HONOR SYSTEM                     ***/
+        /***                CURRENCY SYSTEM                    ***/
         /*********************************************************/
-        time_t m_lastHonorUpdateTime;
-        uint32 m_honorPoints;
-        uint32 m_arenaPoints;
+        PlayerCurrenciesMap m_currencies;
+        uint32 GetCurrencyWeekCap(CurrencyTypesEntry const * currency) const;
+        uint32 GetCurrencyTotalCap(CurrencyTypesEntry const * currency) const;
+        void _LoadCurrencies(QueryResult* result);
+        void _SaveCurrencies();
 
         void outDebugStatsValues() const;
         ObjectGuid m_lootGuid;
@@ -2458,6 +2485,7 @@ class MANGOS_DLL_SPEC Player : public Unit
         uint32 m_speakCount;
         Difficulty m_dungeonDifficulty;
         Difficulty m_raidDifficulty;
+        time_t m_lastHonorKillsUpdateTime;
 
         uint32 m_atLoginFlags;
 
@@ -2483,6 +2511,7 @@ class MANGOS_DLL_SPEC Player : public Unit
         PlayerMails m_mail;
         PlayerSpellMap m_spells;
         PlayerTalentMap m_talents[MAX_TALENT_SPEC_COUNT];
+        uint32 m_talentsPrimaryTree[MAX_TALENT_SPEC_COUNT];
         SpellCooldowns m_spellCooldowns;
         uint32 m_lastPotionId;                              // last used health/mana potion in combat, that block next potion use
 
@@ -2557,6 +2586,7 @@ class MANGOS_DLL_SPEC Player : public Unit
         // Transports
         Transport* m_transport;
 
+        uint32 m_freeTalentPoints;
         uint32 m_resetTalentsCost;
         time_t m_resetTalentsTime;
         uint32 m_usedTalentCount;
@@ -2596,7 +2626,6 @@ class MANGOS_DLL_SPEC Player : public Unit
         InventoryResult _CanStoreItem_InInventorySlots(uint8 slot_begin, uint8 slot_end, ItemPosCountVec& dest, ItemPrototype const* pProto, uint32& count, bool merge, Item* pSrcItem, uint8 skip_bag, uint8 skip_slot) const;
         Item* _StoreItem(uint16 pos, Item* pItem, uint32 count, bool clone, bool update);
 
-        void UpdateKnownCurrencies(uint32 itemId, bool apply);
         void AdjustQuestReqItemCount(Quest const* pQuest, QuestStatusData& questStatusData);
 
         void SetCanDelayTeleport(bool setting) { m_bCanDelayTeleport = setting; }

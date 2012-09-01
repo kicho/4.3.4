@@ -40,7 +40,7 @@
 #include "Util.h"
 #include "Totem.h"
 #include "Vehicle.h"
-#include "BattleGround.h"
+#include "BattleGround/BattleGround.h"
 #include "InstanceData.h"
 #include "OutdoorPvP/OutdoorPvP.h"
 #include "MapPersistentStateMgr.h"
@@ -464,10 +464,12 @@ void GlobalCooldownMgr::CancelGlobalCooldown(SpellEntry const* spellInfo)
 // Methods of class Unit
 
 Unit::Unit() :
-    i_motionMaster(this), m_ThreatManager(this), m_HostileRefManager(this),
+    movespline(new Movement::MoveSpline()),
     m_charmInfo(NULL),
+    i_motionMaster(this),
     m_vehicleInfo(NULL),
-    movespline(new Movement::MoveSpline())
+    m_ThreatManager(this),
+    m_HostileRefManager(this)
 {
     m_objectType |= TYPEMASK_UNIT;
     m_objectTypeId = TYPEID_UNIT;
@@ -1116,26 +1118,29 @@ uint32 Unit::DealDamage(Unit* pVictim, uint32 damage, CleanDamage const* cleanDa
             he->DuelComplete(DUEL_INTERUPTED);
         }
 
-        // handle player kill in outdoor pvp
-        if (player_tap && pVictim->GetTypeId() == TYPEID_PLAYER && pVictim != this)
+        // handle player/npc kill in battleground or outdoor pvp script
+        if (player_tap)
         {
-            if (OutdoorPvP* outdoorPvP = sOutdoorPvPMgr.GetScript(player_tap->GetCachedZoneId()))
-                outdoorPvP->HandlePlayerKill(player_tap, pVictim);
-        }
-
-        // battleground things (do this at the end, so the death state flag will be properly set to handle in the bg->handlekill)
-        if (pVictim->GetTypeId() == TYPEID_PLAYER && ((Player*)pVictim)->InBattleGround())
-        {
-            Player* killed = ((Player*)pVictim);
-            if (BattleGround* bg = killed->GetBattleGround())
-                if (player_tap)
-                    bg->HandleKillPlayer(killed, player_tap);
-        }
-        else if (pVictim->GetTypeId() == TYPEID_UNIT)
-        {
-            if (player_tap)
+            if (pVictim->GetTypeId() == TYPEID_PLAYER)
+            {
+                Player* killed = (Player*)pVictim;
+                if (killed->InBattleGround())
+                {
+                    if (BattleGround* bg = killed->GetBattleGround())
+                        bg->HandleKillPlayer(killed, player_tap);
+                }
+                else if (pVictim != this)
+                {
+                    // selfkills are not handled in outdoor pvp scripts
+                    if (OutdoorPvP* outdoorPvP = sOutdoorPvPMgr.GetScript(player_tap->GetCachedZoneId()))
+                        outdoorPvP->HandlePlayerKill(player_tap, killed);
+                }
+            }
+            else if (pVictim->GetTypeId() == TYPEID_UNIT)
+            {
                 if (BattleGround* bg = player_tap->GetBattleGround())
                     bg->HandleKillUnit((Creature*)pVictim, player_tap);
+            }
         }
     }
     else                                                    // if (health <= damage)
@@ -3748,7 +3753,7 @@ uint32 Unit::GetWeaponSkillValue(WeaponAttackType attType, Unit const* target) c
             return GetMaxSkillValueForLevel();              // always maximized SKILL_FERAL_COMBAT in fact
 
         // weapon skill or (unarmed for base attack)
-        uint32  skill = item ? item->GetSkill() : SKILL_UNARMED;
+        uint32 skill = item ? item->GetSkill() : uint32(SKILL_UNARMED);
 
         // in PvP use full skill instead current skill value
         value = (target && target->GetTypeId() == TYPEID_PLAYER)
@@ -5702,8 +5707,12 @@ FactionTemplateEntry const* Unit::getFactionTemplateEntry() const
 
         if (GetObjectGuid() != guid)
         {
-            sLog.outError("%s have invalid faction (faction template id) #%u", GetGuidStr().c_str(), getFaction());
             guid = GetObjectGuid();
+
+            if (guid.GetHigh() == HIGHGUID_PET)
+                sLog.outError("%s (base creature entry %u) have invalid faction template id %u, owner %s", GetGuidStr().c_str(), GetEntry(), getFaction(), ((Pet*)this)->GetOwnerGuid().GetString().c_str());
+            else
+                sLog.outError("%s have invalid faction template id %u", GetGuidStr().c_str(), getFaction());
         }
     }
     return entry;
@@ -7633,7 +7642,7 @@ uint32 Unit::MeleeDamageBonusDone(Unit* pVictim, uint32 pdamage, WeaponAttackTyp
     bool isWeaponDamageBasedSpell = !(spellProto && (damagetype == DOT || IsSpellHaveEffect(spellProto, SPELL_EFFECT_SCHOOL_DAMAGE)));
     Item*  pWeapon          = GetTypeId() == TYPEID_PLAYER ? ((Player*)this)->GetWeaponForAttack(attType, true, false) : NULL;
     uint32 creatureTypeMask = pVictim->GetCreatureTypeMask();
-    uint32 schoolMask       = spellProto ? spellProto->SchoolMask : GetMeleeDamageSchoolMask();
+    uint32 schoolMask       = spellProto ? spellProto->SchoolMask : uint32(GetMeleeDamageSchoolMask());
 
     // FLAT damage bonus auras
     // =======================
@@ -7888,7 +7897,7 @@ uint32 Unit::MeleeDamageBonusTaken(Unit* pCaster, uint32 pdamage, WeaponAttackTy
 
     // differentiate for weapon damage based spells
     bool isWeaponDamageBasedSpell = !(spellProto && (damagetype == DOT || IsSpellHaveEffect(spellProto, SPELL_EFFECT_SCHOOL_DAMAGE)));
-    uint32 schoolMask       = spellProto ? spellProto->SchoolMask : GetMeleeDamageSchoolMask();
+    uint32 schoolMask       = spellProto ? spellProto->SchoolMask : uint32(GetMeleeDamageSchoolMask());
     uint32 mechanicMask     = spellProto ? GetAllSpellMechanicMask(spellProto) : 0;
 
     // Shred also have bonus as MECHANIC_BLEED damages

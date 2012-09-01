@@ -42,10 +42,10 @@
 #include "Creature.h"
 #include "Totem.h"
 #include "CreatureAI.h"
-#include "BattleGroundMgr.h"
-#include "BattleGround.h"
-#include "BattleGroundEY.h"
-#include "BattleGroundWS.h"
+#include "BattleGround/BattleGroundMgr.h"
+#include "BattleGround/BattleGround.h"
+#include "BattleGround/BattleGroundEY.h"
+#include "BattleGround/BattleGroundWS.h"
 #include "Language.h"
 #include "SocialMgr.h"
 #include "VMapFactory.h"
@@ -204,7 +204,7 @@ pEffect SpellEffects[TOTAL_SPELL_EFFECTS] =
     &Spell::EffectNULL,                                     //141 SPELL_EFFECT_141                      damage and reduce speed?
     &Spell::EffectTriggerSpellWithValue,                    //142 SPELL_EFFECT_TRIGGER_SPELL_WITH_VALUE
     &Spell::EffectApplyAreaAura,                            //143 SPELL_EFFECT_APPLY_AREA_AURA_OWNER
-    &Spell::EffectNULL,                                     //144 SPELL_EFFECT_144                      Spectral Blast
+    &Spell::EffectKnockBackFromPosition,                    //144 SPELL_EFFECT_KNOCKBACK_FROM_POSITION
     &Spell::EffectNULL,                                     //145 SPELL_EFFECT_145                      Black Hole Effect
     &Spell::EffectActivateRune,                             //146 SPELL_EFFECT_ACTIVATE_RUNE
     &Spell::EffectQuestFail,                                //147 SPELL_EFFECT_QUEST_FAIL               quest fail
@@ -1330,6 +1330,14 @@ void Spell::EffectDummy(SpellEffectEntry const* effect)
                     }
 
                     m_caster->CastSpell(m_caster, spell_id, true, NULL);
+                    return;
+                }
+                case 34803:                                 // Summon Reinforcements
+                {
+                    m_caster->CastSpell(m_caster, 34810, true); // Summon 20083 behind of the caster
+                    m_caster->CastSpell(m_caster, 34817, true); // Summon 20078 right of the caster
+                    m_caster->CastSpell(m_caster, 34818, true); // Summon 20078 left of the caster
+                    m_caster->CastSpell(m_caster, 34819, true); // Summon 20078 front of the caster
                     return;
                 }
                 case 36677:                                 // Chaos Breath
@@ -3773,9 +3781,7 @@ void Spell::EffectJump(SpellEffectEntry const* effect)
     float x, y, z, o;
     if (m_targets.m_targetMask & TARGET_FLAG_DEST_LOCATION)
     {
-        x = m_targets.m_destX;
-        y = m_targets.m_destY;
-        z = m_targets.m_destZ;
+        m_targets.getDestination(x, y, z);
 
         if(effect->EffectImplicitTargetA == TARGET_BEHIND_VICTIM)
         {
@@ -3810,10 +3816,10 @@ void Spell::EffectJump(SpellEffectEntry const* effect)
         return;
     }
 
-    m_caster->NearTeleportTo(x, y, z, o, true);
+    m_caster->NearTeleportTo(x, y, z, o, true);             // TODO Implement this as jump movement?
 }
 
-void Spell::EffectTeleportUnits(SpellEffectEntry const* effect)
+void Spell::EffectTeleportUnits(SpellEffectEntry const* effect)   // TODO - Use target settings for this effect!
 {
     if (!unitTarget || unitTarget->IsTaxiFlying())
         return;
@@ -4852,11 +4858,7 @@ void Spell::EffectSummonType(SpellEffectEntry const* effect)
 
     // Set middle position
     if (m_targets.m_targetMask & TARGET_FLAG_DEST_LOCATION)
-    {
-        summonPositions[0].x = m_targets.m_destX;
-        summonPositions[0].y = m_targets.m_destY;
-        summonPositions[0].z = m_targets.m_destZ;
-    }
+        m_targets.getDestination(summonPositions[0].x, summonPositions[0].y, summonPositions[0].z);
     else
     {
         m_caster->GetPosition(summonPositions[0].x, summonPositions[0].y, summonPositions[0].z);
@@ -6596,11 +6598,7 @@ void Spell::EffectSummonObjectWild(SpellEffectEntry const* effect)
 
     float x, y, z;
     if (m_targets.m_targetMask & TARGET_FLAG_DEST_LOCATION)
-    {
-        x = m_targets.m_destX;
-        y = m_targets.m_destY;
-        z = m_targets.m_destZ;
-    }
+        m_targets.getDestination(x, y, z);
     else
         m_caster->GetClosePoint(x, y, z, DEFAULT_WORLD_OBJECT_SIZE);
 
@@ -7058,6 +7056,15 @@ void Spell::EffectScriptEffect(SpellEffectEntry const* effect)
                     if (item)
                         DoCreateItem(effect,item);
 
+                    break;
+                }
+                case 30769:                                 // Pick Red Riding Hood
+                {
+                    if (!unitTarget || unitTarget->GetTypeId() != TYPEID_PLAYER)
+                        return;
+
+                    // cast Little Red Riding Hood
+                    m_caster->CastSpell(unitTarget, 30768, true);
                     break;
                 }
                 case 30918:                                 // Improved Sprint
@@ -7964,6 +7971,11 @@ void Spell::EffectScriptEffect(SpellEffectEntry const* effect)
                             unitTarget->CastSpell(unitTarget, 59815, true);
                             break;
                         }
+                        // These are not restored
+                        case POWER_FOCUS:
+                        case POWER_RUNE:
+                        case POWER_HEALTH:
+                            break;
                     }
                     return;
                 }
@@ -8782,6 +8794,27 @@ void Spell::EffectApplyGlyph(SpellEffectEntry const* effect)
 
     Player* player = (Player*)m_caster;
 
+        // glyph sockets level requirement
+    uint8 minLevel = 0;
+    switch (m_glyphIndex)
+    {
+        case 0:
+        case 1:
+        case 6: minLevel = 25; break;
+        case 2:
+        case 3:
+        case 7: minLevel = 50; break;
+        case 4:
+        case 5:
+        case 8: minLevel = 75; break;
+    }
+
+    if (minLevel && m_caster->getLevel() < minLevel)
+    {
+        SendCastResult(SPELL_FAILED_GLYPH_SOCKET_LOCKED);
+        return;
+    }
+
     // apply new one
     if(uint32 glyph = effect->EffectMiscValue)
     {
@@ -8947,11 +8980,7 @@ void Spell::EffectSummonObject(SpellEffectEntry const* effect)
     float x, y, z;
     // If dest location if present
     if (m_targets.m_targetMask & TARGET_FLAG_DEST_LOCATION)
-    {
-        x = m_targets.m_destX;
-        y = m_targets.m_destY;
-        z = m_targets.m_destZ;
-    }
+        m_targets.getDestination(x, y, z);
     // Summon in random point all other units if location present
     else
         m_caster->GetClosePoint(x, y, z, DEFAULT_WORLD_OBJECT_SIZE);
@@ -9215,9 +9244,7 @@ void Spell::EffectCharge2(SpellEffectEntry const* /*effect*/)
     float x, y, z;
     if (m_targets.m_targetMask & TARGET_FLAG_DEST_LOCATION)
     {
-        x = m_targets.m_destX;
-        y = m_targets.m_destY;
-        z = m_targets.m_destZ;
+        m_targets.getDestination(x, y, z);
 
         if (unitTarget->GetTypeId() != TYPEID_PLAYER)
             ((Creature*)unitTarget)->StopMoving();
@@ -9433,13 +9460,9 @@ void Spell::EffectTransmitted(SpellEffectEntry const* effect)
     float fx, fy, fz;
 
     if (m_targets.m_targetMask & TARGET_FLAG_DEST_LOCATION)
-    {
-        fx = m_targets.m_destX;
-        fy = m_targets.m_destY;
-        fz = m_targets.m_destZ;
-    }
-    //FIXME: this can be better check for most objects but still hack
-    else if(effect->EffectRadiusIndex && m_spellInfo->speed==0)
+        m_targets.getDestination(fx, fy, fz);
+    // FIXME: this can be better check for most objects but still hack
+    else if (effect->EffectRadiusIndex && m_spellInfo->speed == 0)
     {
         float dis = GetSpellRadius(sSpellRadiusStore.LookupEntry(effect->EffectRadiusIndex));
         m_caster->GetClosePoint(fx, fy, fz, DEFAULT_WORLD_OBJECT_SIZE, dis);
@@ -9949,4 +9972,21 @@ void Spell::EffectCancelAura(SpellEffectEntry const* effect)
     }
 
     unitTarget->RemoveAurasDueToSpell(spellId);
+}
+
+void Spell::EffectKnockBackFromPosition(SpellEffectEntry const* effect)
+{
+    if (!unitTarget)
+        return;
+
+    float x, y, z;
+    if (m_targets.m_targetMask & TARGET_FLAG_DEST_LOCATION)
+        m_targets.getDestination(x, y, z);
+    else
+        m_caster->GetPosition(x, y, z);
+
+    float angle = unitTarget->GetAngle(x,y) + M_PI_F;
+    float horizontalSpeed = effect->EffectMiscValue * 0.1f;
+    float verticalSpeed = damage * 0.1f;
+    unitTarget->KnockBackWithAngle(angle, horizontalSpeed, verticalSpeed);
 }

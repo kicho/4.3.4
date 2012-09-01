@@ -26,7 +26,7 @@
 #include "SpellAuras.h"
 #include "MapManager.h"
 #include "Transports.h"
-#include "BattleGround.h"
+#include "BattleGround/BattleGround.h"
 #include "WaypointMovementGenerator.h"
 #include "MapPersistentStateMgr.h"
 #include "ObjectMgr.h"
@@ -565,8 +565,7 @@ void WorldSession::HandleMoverRelocation(MovementInfo& movementInfo)
 
         if (movementInfo.GetPos()->z < -500.0f)
         {
-            if (plMover->InBattleGround()
-                    && plMover->GetBattleGround()
+            if (plMover->GetBattleGround()
                     && plMover->GetBattleGround()->HandlePlayerUnderMap(_player))
             {
                 // do nothing, the handle already did if returned true

@@ -71,8 +71,8 @@ bool LoginQueryHolder::Initialize()
     // !!! NOTE: including unused `zone`,`online`
     res &= SetPQuery(PLAYER_LOGIN_QUERY_LOADFROM,            "SELECT guid, account, name, race, class, gender, level, xp, money, playerBytes, playerBytes2, playerFlags,"
         "position_x, position_y, position_z, map, orientation, taximask, cinematic, totaltime, leveltime, rest_bonus, logout_time, is_logout_resting, resettalents_cost,"
-        "resettalents_time, trans_x, trans_y, trans_z, trans_o, transguid, extra_flags, stable_slots, at_login, zone, online, death_expire_time, taxi_path, dungeon_difficulty,"
-        "arenaPoints, totalHonorPoints, todayHonorPoints, yesterdayHonorPoints, totalKills, todayKills, yesterdayKills, chosenTitle, knownCurrencies, watchedFaction, drunk,"
+        "resettalents_time, primary_trees, trans_x, trans_y, trans_z, trans_o, transguid, extra_flags, stable_slots, at_login, zone, online, death_expire_time, taxi_path, dungeon_difficulty,"
+        "totalKills, todayKills, yesterdayKills, chosenTitle, watchedFaction, drunk,"
         "health, power1, power2, power3, power4, power5, specCount, activeSpec, exploredZones, equipmentCache, knownTitles, actionBars, slot FROM characters WHERE guid = '%u'", m_guid.GetCounter());
     res &= SetPQuery(PLAYER_LOGIN_QUERY_LOADGROUP,           "SELECT groupId FROM group_member WHERE memberGuid ='%u'", m_guid.GetCounter());
     res &= SetPQuery(PLAYER_LOGIN_QUERY_LOADBOUNDINSTANCES,  "SELECT id, permanent, map, difficulty, resettime FROM character_instance LEFT JOIN instance ON instance = id WHERE guid = '%u'", m_guid.GetCounter());
@@ -104,6 +104,7 @@ bool LoginQueryHolder::Initialize()
     res &= SetPQuery(PLAYER_LOGIN_QUERY_LOADGLYPHS,          "SELECT spec, slot, glyph FROM character_glyphs WHERE guid='%u'", m_guid.GetCounter());
     res &= SetPQuery(PLAYER_LOGIN_QUERY_LOADMAILS,           "SELECT id,messageType,sender,receiver,subject,body,expire_time,deliver_time,money,cod,checked,stationery,mailTemplateId,has_items FROM mail WHERE receiver = '%u' ORDER BY id DESC", m_guid.GetCounter());
     res &= SetPQuery(PLAYER_LOGIN_QUERY_LOADMAILEDITEMS,     "SELECT data, text, mail_id, item_guid, item_template FROM mail_items JOIN item_instance ON item_guid = guid WHERE receiver = '%u'", m_guid.GetCounter());
+    res &= SetPQuery(PLAYER_LOGIN_QUERY_LOADCURRENCIES,      "SELECT id, totalCount, weekCount, seasonCount, flags FROM character_currencies WHERE guid = '%u'", m_guid.GetCounter());
 
     return res;
 }
@@ -226,6 +227,7 @@ void WorldSession::HandleCharCreateOpcode(WorldPacket& recv_data)
             {
                 case ALLIANCE: disabled = mask & (1 << 0); break;
                 case HORDE:    disabled = mask & (1 << 1); break;
+                default: break;
             }
 
             if (disabled)
@@ -1397,3 +1399,21 @@ void WorldSession::HandleReorderCharactersOpcode(WorldPacket& recv_data)
         slots[i], guids[i].GetCounter(), GetAccountId());
     CharacterDatabase.CommitTransaction();
 }
+
+void WorldSession::HandleSetCurrencyFlagsOpcode(WorldPacket& recv_data)
+{
+    uint32 currencyId, flags;
+    recv_data >> flags >> currencyId;
+
+    DEBUG_LOG("CMSG_SET_CURRENCY_FLAGS: currency: %u, flags: %u", currencyId, flags);
+
+    if (flags & ~PLAYERCURRENCY_MASK_USED_BY_CLIENT)
+    {
+        DEBUG_LOG("CMSG_SET_CURRENCY_FLAGS: received unknown currency flags 0x%X from player %s account %u for currency %u",
+            flags & ~PLAYERCURRENCY_MASK_USED_BY_CLIENT, GetPlayer()->GetGuidStr().c_str(), GetAccountId(), currencyId);
+    }
+
+    flags &= PLAYERCURRENCY_MASK_USED_BY_CLIENT;
+    GetPlayer()->SetCurrencyFlags(currencyId, uint8(flags));
+}
+

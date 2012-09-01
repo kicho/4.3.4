@@ -297,7 +297,7 @@ enum MangosStrings
     LANG_COMMAND_TICKETDEL              = 296,
     LANG_COMMAND_SPAWNDIST              = 297,
     LANG_COMMAND_SPAWNTIME              = 298,
-    LANG_COMMAND_MODIFY_HONOR           = 299,
+    LANG_COMMAND_MODIFY_CURRENCY        = 299,
 
     LANG_YOUR_CHAT_DISABLED             = 300,
     LANG_YOU_DISABLE_CHAT               = 301,
@@ -306,7 +306,7 @@ enum MangosStrings
     LANG_YOU_ENABLE_CHAT                = 304,
 
     LANG_COMMAND_MODIFY_REP             = 305,
-    LANG_COMMAND_MODIFY_ARENA           = 306,
+    LANG_CURRENCY_AMOUNT                = 306,
     LANG_COMMAND_FACTION_NOTFOUND       = 307,
     LANG_COMMAND_FACTION_UNKNOWN        = 308,
     LANG_COMMAND_FACTION_INVPARAM       = 309,
@@ -462,7 +462,7 @@ enum MangosStrings
     LANG_COMMAND_GRAVEYARDALRLINKED     = 450,
     LANG_COMMAND_GRAVEYARDLINKED        = 451,
     LANG_COMMAND_GRAVEYARDWRONGZONE     = 452,
-    //                                  = 453,
+    LANG_COMMAND_NOCURRENCYFOUND        = 453,
     LANG_COMMAND_GRAVEYARDERROR         = 454,
     LANG_COMMAND_GRAVEYARD_NOTEAM       = 455,
     LANG_COMMAND_GRAVEYARD_ANY          = 456,
@@ -746,12 +746,12 @@ enum MangosStrings
     LANG_DEBUG_ARENA_OFF                = 738,
     LANG_DEBUG_BG_ON                    = 739,
     LANG_DEBUG_BG_OFF                   = 740,
-    LANG_DIST_ARENA_POINTS_START        = 741,
-    LANG_DIST_ARENA_POINTS_ONLINE_START = 742,
-    LANG_DIST_ARENA_POINTS_ONLINE_END   = 743,
-    LANG_DIST_ARENA_POINTS_TEAM_START   = 744,
-    LANG_DIST_ARENA_POINTS_TEAM_END     = 745,
-    LANG_DIST_ARENA_POINTS_END          = 746,
+//                                      = 741, not used
+//                                      = 742, not used
+//                                      = 743, not used
+//                                      = 744, not used
+//                                      = 745, not used
+//                                      = 746, not used
 //                                      = 747, not used
 //                                      = 748, not used
 //                                      = 749, not used

@@ -37,7 +37,7 @@
 #include "Totem.h"
 #include "Creature.h"
 #include "Formulas.h"
-#include "BattleGround.h"
+#include "BattleGround/BattleGround.h"
 #include "OutdoorPvP/OutdoorPvP.h"
 #include "CreatureAI.h"
 #include "ScriptMgr.h"
@@ -6712,6 +6712,16 @@ void Aura::HandleShapeshiftBoosts(bool apply)
         case FORM_STEALTH:
         case FORM_CREATURECAT:
         case FORM_CREATUREBEAR:
+        case FORM_STEVES_GHOUL:
+        case FORM_THARONJA_SKELETON:
+        case FORM_TEST_OF_STRENGTH:
+        case FORM_BLB_PLAYER:
+        case FORM_SHADOW_DANCE:
+        case FORM_TEST:
+        case FORM_ZOMBIE:
+        case FORM_UNDEAD:
+        case FORM_FRENZY:
+        case FORM_NONE:
             break;
     }
 
@@ -8639,7 +8649,7 @@ void Aura::HandlePhase(bool apply, bool Real)
             target->RemoveAurasDueToSpell(phases.front()->GetId(), GetHolder());
     }
 
-    target->SetPhaseMask(apply ? GetMiscValue() : PHASEMASK_NORMAL, true);
+    target->SetPhaseMask(apply ? GetMiscValue() : uint32(PHASEMASK_NORMAL), true);
     // no-phase is also phase state so same code for apply and remove
     if (GetEffIndex() == EFFECT_INDEX_0 && target->GetTypeId() == TYPEID_PLAYER)
     {
@@ -8741,9 +8751,11 @@ bool Aura::HasMechanic(uint32 mechanic) const
 }
 
 SpellAuraHolder::SpellAuraHolder(SpellEntry const* spellproto, Unit* target, WorldObject* caster, Item* castItem) :
-    m_spellProto(spellproto), m_target(target), m_castItemGuid(castItem ? castItem->GetObjectGuid() : ObjectGuid()),
-    m_auraSlot(MAX_AURAS), m_auraFlags(AFLAG_NONE), m_auraLevel(1), m_procCharges(0),
-    m_stackAmount(1), m_removeMode(AURA_REMOVE_BY_DEFAULT), m_AuraDRGroup(DIMINISHING_NONE), m_timeCla(1000),
+    m_spellProto(spellproto),
+    m_target(target), m_castItemGuid(castItem ? castItem->GetObjectGuid() : ObjectGuid()),
+    m_auraSlot(MAX_AURAS), m_auraFlags(AFLAG_NONE), m_auraLevel(1),
+    m_procCharges(0), m_stackAmount(1),
+    m_timeCla(1000), m_removeMode(AURA_REMOVE_BY_DEFAULT), m_AuraDRGroup(DIMINISHING_NONE),
     m_permanent(false), m_isRemovedOnShapeLost(true), m_deleted(false), m_in_use(0)
 {
     MANGOS_ASSERT(target);

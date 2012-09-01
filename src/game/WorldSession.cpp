@@ -33,7 +33,7 @@
 #include "Guild.h"
 #include "GuildMgr.h"
 #include "World.h"
-#include "BattleGroundMgr.h"
+#include "BattleGround/BattleGroundMgr.h"
 #include "MapManager.h"
 #include "SocialMgr.h"
 #include "Auth/AuthCrypt.h"
@@ -548,7 +548,9 @@ void WorldSession::SendNotification(const char* format, ...)
         va_end(ap);
 
         WorldPacket data(SMSG_NOTIFICATION, (strlen(szStr) + 1));
-        data << szStr;
+        data.WriteBits(strlen(szStr), 13);
+        data.FlushBits();
+        data.append(szStr, strlen(szStr));
         SendPacket(&data);
     }
 }
@@ -566,7 +568,9 @@ void WorldSession::SendNotification(int32 string_id, ...)
         va_end(ap);
 
         WorldPacket data(SMSG_NOTIFICATION, (strlen(szStr) + 1));
-        data << szStr;
+        data.WriteBits(strlen(szStr), 13);
+        data.FlushBits();
+        data.append(szStr, strlen(szStr));
         SendPacket(&data);
     }
 }

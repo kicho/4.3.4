@@ -36,8 +36,8 @@
 #include "CellImpl.h"
 #include "Language.h"
 #include "MapManager.h"
-#include "BattleGround.h"
-#include "BattleGroundAB.h"
+#include "BattleGround/BattleGround.h"
+#include "BattleGround/BattleGroundAB.h"
 #include "Map.h"
 #include "InstanceData.h"
 #include "DBCStructure.h"
@@ -923,7 +923,7 @@ void AchievementMgr::UpdateAchievementCriteria(AchievementCriteriaTypes type, ui
                         case 156:                           // AB, win while controlling all 5 flags (all nodes)
                         case 784:                           // EY, win while holding 4 bases (all nodes)
                         {
-                            if (!bg->IsAllNodesConrolledByTeam(GetPlayer()->GetTeam()))
+                            if (!bg->IsAllNodesControlledByTeam(GetPlayer()->GetTeam()))
                                 continue;
                             break;
                         }
@@ -1040,6 +1040,15 @@ void AchievementMgr::UpdateAchievementCriteria(AchievementCriteriaTypes type, ui
                 }
                 change = counter;
                 progressType = PROGRESS_HIGHEST;
+                break;
+            }
+            case ACHIEVEMENT_CRITERIA_TYPE_CURRENCY_EARNED:
+            {
+                if (!miscvalue1 || !miscvalue2 || miscvalue1 != achievementCriteria->currencyEarned.currencyId)
+                    return;
+
+                change = miscvalue2;
+                progressType = PROGRESS_ACCUMULATE;
                 break;
             }
             case ACHIEVEMENT_CRITERIA_TYPE_COMPLETE_BATTLEGROUND:
@@ -1736,6 +1745,9 @@ uint32 AchievementMgr::GetCriteriaProgressMaxCounter(AchievementCriteriaEntry co
             break;
         case ACHIEVEMENT_CRITERIA_TYPE_COMPLETE_QUESTS_IN_ZONE:
             resultValue = achievementCriteria->complete_quests_in_zone.questCount;
+            break;
+        case ACHIEVEMENT_CRITERIA_TYPE_CURRENCY_EARNED:
+            resultValue = achievementCriteria->currencyEarned.count;
             break;
         case ACHIEVEMENT_CRITERIA_TYPE_DAMAGE_DONE:
         case ACHIEVEMENT_CRITERIA_TYPE_HEALING_DONE:
@@ -2662,7 +2674,7 @@ void AchievementGlobalMgr::LoadCompletedAchievements()
     delete result;
 
     sLog.outString();
-    sLog.outString(">> Loaded %lu realm completed achievements.", (unsigned long)m_allCompletedAchievements.size());
+    sLog.outString(">> Loaded " SIZEFMTD " realm completed achievements.", m_allCompletedAchievements.size());
 }
 
 void AchievementGlobalMgr::LoadRewards()
@@ -2889,5 +2901,5 @@ void AchievementGlobalMgr::LoadRewardLocales()
     delete result;
 
     sLog.outString();
-    sLog.outString(">> Loaded %lu achievement reward locale strings", (unsigned long)m_achievementRewardLocales.size());
+    sLog.outString(">> Loaded " SIZEFMTD " achievement reward locale strings", m_achievementRewardLocales.size());
 }

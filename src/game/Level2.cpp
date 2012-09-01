@@ -4147,7 +4147,7 @@ bool ChatHandler::HandleHonorAddKillCommand(char* /*args*/)
     return true;
 }
 
-bool ChatHandler::HandleHonorUpdateCommand(char* /*args*/)
+bool ChatHandler::HandleHonorKillsUpdateCommand(char* /*args*/)
 {
     Player* target = getSelectedPlayer();
     if (!target)
@@ -4161,7 +4161,7 @@ bool ChatHandler::HandleHonorUpdateCommand(char* /*args*/)
     if (HasLowerSecurity(target))
         return false;
 
-    target->UpdateHonorFields();
+    target->UpdateHonorKills();
     return true;
 }
 
@@ -5415,7 +5415,7 @@ bool ChatHandler::HandleMmapPathCommand(char* args)
     PointsArray pointPath = path.getPath();
     PSendSysMessage("%s's path to %s:", target->GetName(), player->GetName());
     PSendSysMessage("Building %s", useStraightPath ? "StraightPath" : "SmoothPath");
-    PSendSysMessage("length %i type %u", pointPath.size(), path.getPathType());
+    PSendSysMessage("length " SIZEFMTD " type %u", pointPath.size(), path.getPathType());
 
     Vector3 start = path.getStartPosition();
     Vector3 end = path.getEndPosition();

@@ -49,9 +49,9 @@
 #include "Util.h"
 #include "Transports.h"
 #include "Weather.h"
-#include "BattleGround.h"
-#include "BattleGroundAV.h"
-#include "BattleGroundMgr.h"
+#include "BattleGround/BattleGround.h"
+#include "BattleGround/BattleGroundMgr.h"
+#include "BattleGround/BattleGroundAV.h"
 #include "OutdoorPvP/OutdoorPvP.h"
 #include "ArenaTeam.h"
 #include "Chat.h"
@@ -163,6 +163,7 @@ void PlayerTaxi::InitTaxiNodesForLevel(uint32 race, uint32 chrClass, uint32 leve
     {
         case ALLIANCE: SetTaximaskNode(100); break;
         case HORDE:    SetTaximaskNode(99);  break;
+        default: break;
     }
     // level dependent taxi hubs
     if (level >= 68)
@@ -415,6 +416,7 @@ Player::Player(WorldSession* session): Unit(), m_mover(this), m_camera(this), m_
 
     m_usedTalentCount = 0;
     m_questRewardTalentCount = 0;
+    m_freeTalentPoints = 0;
 
     m_regenTimer = 0;
     m_weaponChangeTimer = 0;
@@ -534,6 +536,8 @@ Player::Player(WorldSession* session): Unit(), m_mover(this), m_camera(this), m_
 
     m_activeSpec = 0;
     m_specsCount = 1;
+    for (int i = 0; i < MAX_TALENT_SPEC_COUNT; ++i)
+        m_talentsPrimaryTree[i] = 0;
 
     for (int i = 0; i < BASEMOD_END; ++i)
     {
@@ -550,10 +554,7 @@ Player::Player(WorldSession* session): Unit(), m_mover(this), m_camera(this), m_
     m_armorPenetrationPct = 0.0f;
     m_spellPenetrationItemMod = 0;
 
-    // Honor System
-    m_lastHonorUpdateTime = time(NULL);
-    m_honorPoints = 0;
-    m_arenaPoints = 0;
+    m_lastHonorKillsUpdateTime = time(NULL);
 
     // Player summoning
     m_summon_expire = 0;
@@ -724,8 +725,8 @@ bool Player::Create(uint32 guidlow, const std::string& name, uint8 race, uint8 c
     InitRunes();
 
     SetUInt32Value(PLAYER_FIELD_COINAGE, sWorld.getConfig(CONFIG_UINT32_START_PLAYER_MONEY));
-    SetHonorPoints(sWorld.getConfig(CONFIG_UINT32_START_HONOR_POINTS));
-    SetArenaPoints(sWorld.getConfig(CONFIG_UINT32_START_ARENA_POINTS));
+    SetCurrencyCount(CURRENCY_HONOR_POINTS,sWorld.getConfig(CONFIG_UINT32_CURRENCY_START_HONOR_POINTS));
+    SetCurrencyCount(CURRENCY_CONQUEST_POINTS, sWorld.getConfig(CONFIG_UINT32_CURRENCY_START_CONQUEST_POINTS));
 
     // Played time
     m_Last_tick = time(NULL);
@@ -2391,7 +2392,7 @@ void Player::SetGameMaster(bool on)
 
         // restore phase
         AuraList const& phases = GetAurasByType(SPELL_AURA_PHASE);
-        SetPhaseMask(!phases.empty() ? phases.front()->GetMiscValue() : PHASEMASK_NORMAL, false);
+        SetPhaseMask(!phases.empty() ? phases.front()->GetMiscValue() : uint32(PHASEMASK_NORMAL), false);
 
         CallForAllControlledUnits(SetGameMasterOffHelper(getFaction()), CONTROLLED_PET | CONTROLLED_TOTEMS | CONTROLLED_GUARDIANS | CONTROLLED_CHARM);
 
@@ -2646,6 +2647,12 @@ void Player::UpdateFreeTalentPoints(bool resetIfNeed)
     }
     else
     {
+        if (m_specsCount == 0)
+        {
+            m_specsCount = 1;
+            m_activeSpec = 0;
+        }
+
         uint32 talentPointsForLevel = CalculateTalentsPoints();
 
         // if used more that have then reset
@@ -3846,6 +3853,17 @@ bool Player::resetTalents(bool no_cost, bool all_specs)
         iter = m_talents[m_activeSpec].begin();
     }
 
+    // Remove spec specific spells
+    for (uint32 i = 0; i < MAX_TALENT_TABS; ++i)
+    {
+        std::vector<uint32> const* specSpells = GetTalentTreePrimarySpells(GetTalentTabPages(getClass())[i]);
+        if (specSpells)
+            for (size_t i = 0; i < specSpells->size(); ++i)
+                removeSpell(specSpells->at(i), true);
+    }
+
+    m_talentsPrimaryTree[m_activeSpec] = 0;
+
     // for not current spec just mark removed all saved to DB case and drop not saved
     if (all_specs)
     {
@@ -4045,13 +4063,6 @@ void Player::BuildCreateUpdateBlockForPlayer(UpdateData* data, Player* target) c
 
             m_items[i]->BuildCreateUpdateBlockForPlayer(data, target);
         }
-        for (int i = KEYRING_SLOT_START; i < CURRENCYTOKEN_SLOT_END; ++i)
-        {
-            if (m_items[i] == NULL)
-                continue;
-
-            m_items[i]->BuildCreateUpdateBlockForPlayer(data, target);
-        }
     }
 
     SetPhaseAndMap(target);
@@ -4090,13 +4101,6 @@ void Player::DestroyForPlayer(Player* target, bool anim) const
     if (target == this)
     {
         for (int i = INVENTORY_SLOT_BAG_START; i < BANK_SLOT_BAG_END; ++i)
-        {
-            if (m_items[i] == NULL)
-                continue;
-
-            m_items[i]->DestroyForPlayer(target);
-        }
-        for (int i = KEYRING_SLOT_START; i < CURRENCYTOKEN_SLOT_END; ++i)
         {
             if (m_items[i] == NULL)
                 continue;
@@ -4397,6 +4401,7 @@ void Player::DeleteFromDB(ObjectGuid playerguid, uint32 accountId, bool updateRe
             CharacterDatabase.PExecute("DELETE FROM character_equipmentsets WHERE guid = '%u'", lowguid);
             CharacterDatabase.PExecute("DELETE FROM guild_eventlog WHERE PlayerGuid1 = '%u' OR PlayerGuid2 = '%u'", lowguid, lowguid);
             CharacterDatabase.PExecute("DELETE FROM guild_bank_eventlog WHERE PlayerGuid = '%u'", lowguid);
+            CharacterDatabase.PExecute("DELETE FROM character_currencies WHERE guid = '%u'", lowguid);
             CharacterDatabase.CommitTransaction();
             break;
         }
@@ -4707,9 +4712,6 @@ void Player::DurabilityLossAll(double percent, bool inventory)
             if (Item* pItem = GetItemByPos(INVENTORY_SLOT_BAG_0, i))
                 DurabilityLoss(pItem, percent);
 
-        // keys not have durability
-        // for(int i = KEYRING_SLOT_START; i < KEYRING_SLOT_END; ++i)
-
         for (int i = INVENTORY_SLOT_BAG_START; i < INVENTORY_SLOT_BAG_END; ++i)
             if (Bag* pBag = (Bag*)GetItemByPos(INVENTORY_SLOT_BAG_0, i))
                 for (uint32 j = 0; j < pBag->GetBagSize(); ++j)
@@ -4750,9 +4752,6 @@ void Player::DurabilityPointsLossAll(int32 points, bool inventory)
         for (int i = INVENTORY_SLOT_ITEM_START; i < INVENTORY_SLOT_ITEM_END; ++i)
             if (Item* pItem = GetItemByPos(INVENTORY_SLOT_BAG_0, i))
                 DurabilityPointsLoss(pItem, points);
-
-        // keys not have durability
-        // for(int i = KEYRING_SLOT_START; i < KEYRING_SLOT_END; ++i)
 
         for (int i = INVENTORY_SLOT_BAG_START; i < INVENTORY_SLOT_BAG_END; ++i)
             if (Bag* pBag = (Bag*)GetItemByPos(INVENTORY_SLOT_BAG_0, i))
@@ -6539,30 +6538,24 @@ void Player::RewardReputation(Quest const* pQuest)
     // TODO: implement reputation spillover
 }
 
-void Player::UpdateArenaFields(void)
-{
-    /* arena calcs go here */
-}
-
-void Player::UpdateHonorFields()
+void Player::UpdateHonorKills()
 {
     /// called when rewarding honor and at each save
     time_t now = time(NULL);
     time_t today = (time(NULL) / DAY) * DAY;
 
-    if (m_lastHonorUpdateTime < today)
+    if (m_lastHonorKillsUpdateTime < today)
     {
         time_t yesterday = today - DAY;
 
-        uint16 kills_today = PAIR32_LOPART(GetUInt32Value(PLAYER_FIELD_KILLS));
+        uint16 kills_today = GetUInt16Value(PLAYER_FIELD_KILLS, 0);
 
         // update yesterday's contribution
-        if (m_lastHonorUpdateTime >= yesterday)
+        if (m_lastHonorKillsUpdateTime >= yesterday)
         {
-            //SetUInt32Value(PLAYER_FIELD_YESTERDAY_CONTRIBUTION, GetUInt32Value(PLAYER_FIELD_TODAY_CONTRIBUTION));
-
             // this is the first update today, reset today's contribution
-            SetUInt32Value(PLAYER_FIELD_KILLS, MAKE_PAIR32(0,kills_today));
+            SetUInt16Value(PLAYER_FIELD_KILLS, 0, 0);
+            SetUInt16Value(PLAYER_FIELD_KILLS, 1, kills_today);
         }
         else
         {
@@ -6571,7 +6564,7 @@ void Player::UpdateHonorFields()
         }
     }
 
-    m_lastHonorUpdateTime = now;
+    m_lastHonorKillsUpdateTime = now;
 }
 
 /// Calculate the amount of honor gained based on the victim
@@ -6599,7 +6592,7 @@ bool Player::RewardHonor(Unit* uVictim, uint32 groupsize, float honor)
     uint32 victim_rank = 0;
 
     // need call before fields update to have chance move yesterday data to appropriate fields before today data change.
-    UpdateHonorFields();
+    UpdateHonorKills();
 
     if (honor <= 0)
     {
@@ -6698,50 +6691,9 @@ bool Player::RewardHonor(Unit* uVictim, uint32 groupsize, float honor)
     GetSession()->SendPacket(&data);
 
     // add honor points
-    ModifyHonorPoints(int32(honor));
+    ModifyCurrencyCount(CURRENCY_HONOR_POINTS, int32(honor));
 
-    // FIXME 4x ApplyModUInt32Value(PLAYER_FIELD_TODAY_CONTRIBUTION, uint32(honor), true);
     return true;
-}
-
-void Player::SetHonorPoints(uint32 value)
-{
-    if (value > sWorld.getConfig(CONFIG_UINT32_MAX_HONOR_POINTS))
-        value = sWorld.getConfig(CONFIG_UINT32_MAX_HONOR_POINTS);
-
-    // FIXME 4x SetUInt32Value(PLAYER_FIELD_HONOR_CURRENCY, value);
-    // must be recalculated to new honor points items and removed
-    m_honorPoints = value;
-}
-
-void Player::SetArenaPoints(uint32 value)
-{
-    if (value > sWorld.getConfig(CONFIG_UINT32_MAX_ARENA_POINTS))
-        value = sWorld.getConfig(CONFIG_UINT32_MAX_ARENA_POINTS);
-
-    // FIXME 4x SetUInt32Value(PLAYER_FIELD_ARENA_CURRENCY, value);
-    // must be recalculated to new honor points items and removed
-    m_arenaPoints = value;
-}
-
-void Player::ModifyHonorPoints(int32 value)
-{
-    int32 newValue = (int32)GetHonorPoints() + value;
-
-    if (newValue < 0)
-        newValue = 0;
-
-    SetHonorPoints(newValue);
-}
-
-void Player::ModifyArenaPoints(int32 value)
-{
-    int32 newValue = (int32)GetArenaPoints() + value;
-
-    if (newValue < 0)
-        newValue = 0;
-
-    SetArenaPoints(newValue);
 }
 
 uint32 Player::GetGuildIdFromDB(ObjectGuid guid)
@@ -6863,9 +6815,11 @@ void Player::UpdateArea(uint32 newArea)
     UpdateAreaDependentAuras();
 }
 
-bool Player::CanUseOutdoorCapturePoint()
+bool Player::CanUseCapturePoint()
 {
-    return CanUseCapturePoint() &&
+    return isAlive() &&                                     // living
+           !HasStealthAura() &&                             // not stealthed
+           !HasInvisibilityAura() &&                        // visible
            (IsPvP() || sWorld.IsPvPRealm()) &&
            !HasMovementFlag(MOVEFLAG_FLYING) &&
            !IsTaxiFlying() &&
@@ -8581,40 +8535,27 @@ static WorldStatePair AB_world_states[] =
 
 static WorldStatePair EY_world_states[] =
 {
-    { 0xac1, 0x0 },                                         // 2753  7 Horde Bases
-    { 0xac0, 0x0 },                                         // 2752  8 Alliance Bases
-    { 0xab6, 0x0 },                                         // 2742  9 Mage Tower - Horde conflict
-    { 0xab5, 0x0 },                                         // 2741 10 Mage Tower - Alliance conflict
-    { 0xab4, 0x0 },                                         // 2740 11 Fel Reaver - Horde conflict
-    { 0xab3, 0x0 },                                         // 2739 12 Fel Reaver - Alliance conflict
-    { 0xab2, 0x0 },                                         // 2738 13 Draenei - Alliance conflict
-    { 0xab1, 0x0 },                                         // 2737 14 Draenei - Horde conflict
-    { 0xab0, 0x0 },                                         // 2736 15 unk // 0 at start
-    { 0xaaf, 0x0 },                                         // 2735 16 unk // 0 at start
-    { 0xaad, 0x0 },                                         // 2733 17 Draenei - Horde control
-    { 0xaac, 0x0 },                                         // 2732 18 Draenei - Alliance control
-    { 0xaab, 0x1 },                                         // 2731 19 Draenei uncontrolled (1 - yes, 0 - no)
-    { 0xaaa, 0x0 },                                         // 2730 20 Mage Tower - Alliance control
-    { 0xaa9, 0x0 },                                         // 2729 21 Mage Tower - Horde control
-    { 0xaa8, 0x1 },                                         // 2728 22 Mage Tower uncontrolled (1 - yes, 0 - no)
-    { 0xaa7, 0x0 },                                         // 2727 23 Fel Reaver - Horde control
-    { 0xaa6, 0x0 },                                         // 2726 24 Fel Reaver - Alliance control
-    { 0xaa5, 0x1 },                                         // 2725 25 Fel Reaver uncontrolled (1 - yes, 0 - no)
-    { 0xaa4, 0x0 },                                         // 2724 26 Boold Elf - Horde control
-    { 0xaa3, 0x0 },                                         // 2723 27 Boold Elf - Alliance control
-    { 0xaa2, 0x1 },                                         // 2722 28 Boold Elf uncontrolled (1 - yes, 0 - no)
-    { 0xac5, 0x1 },                                         // 2757 29 Flag (1 - show, 0 - hide) - doesn't work exactly this way!
-    { 0xad2, 0x1 },                                         // 2770 30 Horde top-stats (1 - show, 0 - hide) // 02 -> horde picked up the flag
-    { 0xad1, 0x1 },                                         // 2769 31 Alliance top-stats (1 - show, 0 - hide) // 02 -> alliance picked up the flag
-    { 0xabe, 0x0 },                                         // 2750 32 Horde resources
-    { 0xabd, 0x0 },                                         // 2749 33 Alliance resources
-    { 0xa05, 0x8e },                                        // 2565 34 unk, constant?
-    { 0xaa0, 0x0 },                                         // 2720 35 Capturing progress-bar (100 -> empty (only grey), 0 -> blue|red (no grey), default 0)
-    { 0xa9f, 0x0 },                                         // 2719 36 Capturing progress-bar (0 - left, 100 - right)
-    { 0xa9e, 0x0 },                                         // 2718 37 Capturing progress-bar (1 - show, 0 - hide)
-    { 0xc0d, 0x17b },                                       // 3085 38 unk
-    // and some more ... unknown
-    { 0x0,   0x0 }
+    { 2753, 0 },                                            // WORLD_STATE_EY_TOWER_COUNT_HORDE
+    { 2752, 0 },                                            // WORLD_STATE_EY_TOWER_COUNT_ALLIANCE
+    { 2733, WORLD_STATE_REMOVE },                           // WORLD_STATE_EY_DRAENEI_RUINS_HORDE
+    { 2732, WORLD_STATE_REMOVE },                           // WORLD_STATE_EY_DRAENEI_RUINS_ALLIANCE
+    { 2731, WORLD_STATE_REMOVE },                           // WORLD_STATE_EY_DRAENEI_RUINS_NEUTRAL
+    { 2730, WORLD_STATE_REMOVE },                           // WORLD_STATE_EY_MAGE_TOWER_ALLIANCE
+    { 2729, WORLD_STATE_REMOVE },                           // WORLD_STATE_EY_MAGE_TOWER_HORDE
+    { 2728, WORLD_STATE_REMOVE },                           // WORLD_STATE_EY_MAGE_TOWER_NEUTRAL
+    { 2727, WORLD_STATE_REMOVE },                           // WORLD_STATE_EY_FEL_REAVER_HORDE
+    { 2726, WORLD_STATE_REMOVE },                           // WORLD_STATE_EY_FEL_REAVER_ALLIANCE
+    { 2725, WORLD_STATE_REMOVE },                           // WORLD_STATE_EY_FEL_REAVER_NEUTRAL
+    { 2724, WORLD_STATE_REMOVE },                           // WORLD_STATE_EY_BLOOD_ELF_HORDE
+    { 2723, WORLD_STATE_REMOVE },                           // WORLD_STATE_EY_BLOOD_ELF_ALLIANCE
+    { 2722, WORLD_STATE_REMOVE },                           // WORLD_STATE_EY_BLOOD_ELF_NEUTRAL
+    { 2757, WORLD_STATE_REMOVE },                           // WORLD_STATE_EY_NETHERSTORM_FLAG_READY
+    { 2770, 1 },                                            // WORLD_STATE_EY_NETHERSTORM_FLAG_STATE_HORDE
+    { 2769, 1 },                                            // WORLD_STATE_EY_NETHERSTORM_FLAG_STATE_ALLIANCE
+    { 2750, 0 },                                            // WORLD_STATE_EY_RESOURCES_HORDE
+    { 2749, 0 },                                            // WORLD_STATE_EY_RESOURCES_ALLIANCE
+    { 2565, 0x8e },                                         // global unk -- TODO: move to global world state
+    { 3085, 0x17b }                                         // global unk -- TODO: move to global world state
 };
 
 static WorldStatePair SI_world_states[] =                   // Silithus
@@ -9220,16 +9161,6 @@ InventoryResult Player::CanUnequipItems(uint32 item, uint32 count) const
                 return EQUIP_ERR_OK;
         }
     }
-    for (int i = KEYRING_SLOT_START; i < CURRENCYTOKEN_SLOT_END; ++i)
-    {
-        pItem = GetItemByPos(INVENTORY_SLOT_BAG_0, i);
-        if (pItem && pItem->GetEntry() == item)
-        {
-            tempcount += pItem->GetCount();
-            if (tempcount >= count)
-                return EQUIP_ERR_OK;
-        }
-    }
     Bag* pBag;
     for (int i = INVENTORY_SLOT_BAG_START; i < INVENTORY_SLOT_BAG_END; ++i)
     {
@@ -9260,12 +9191,6 @@ uint32 Player::GetItemCount(uint32 item, bool inBankAlso, Item* skipItem) const
     {
         Item* pItem = GetItemByPos(INVENTORY_SLOT_BAG_0, i);
         if (pItem && pItem != skipItem &&  pItem->GetEntry() == item)
-            count += pItem->GetCount();
-    }
-    for (int i = KEYRING_SLOT_START; i < CURRENCYTOKEN_SLOT_END; ++i)
-    {
-        Item* pItem = GetItemByPos(INVENTORY_SLOT_BAG_0, i);
-        if (pItem && pItem != skipItem && pItem->GetEntry() == item)
             count += pItem->GetCount();
     }
     for (int i = INVENTORY_SLOT_BAG_START; i < INVENTORY_SLOT_BAG_END; ++i)
@@ -9322,11 +9247,6 @@ uint32 Player::GetItemCountWithLimitCategory(uint32 limitCategory, Item* skipIte
             if (pItem->GetProto()->ItemLimitCategory == limitCategory && pItem != skipItem)
                 count += pItem->GetCount();
 
-    for (int i = KEYRING_SLOT_START; i < CURRENCYTOKEN_SLOT_END; ++i)
-        if (Item* pItem = GetItemByPos(INVENTORY_SLOT_BAG_0, i))
-            if (pItem->GetProto()->ItemLimitCategory == limitCategory && pItem != skipItem)
-                count += pItem->GetCount();
-
     for (int i = INVENTORY_SLOT_BAG_START; i < INVENTORY_SLOT_BAG_END; ++i)
         if (Bag* pBag = (Bag*)GetItemByPos(INVENTORY_SLOT_BAG_0, i))
             count += pBag->GetItemCountWithLimitCategory(limitCategory, skipItem);
@@ -9350,11 +9270,6 @@ Item* Player::GetItemByEntry(uint32 item) const
             if (pItem->GetEntry() == item)
                 return pItem;
 
-    for (int i = KEYRING_SLOT_START; i < CURRENCYTOKEN_SLOT_END; ++i)
-        if (Item* pItem = GetItemByPos(INVENTORY_SLOT_BAG_0, i))
-            if (pItem->GetEntry() == item)
-                return pItem;
-
     for (int i = INVENTORY_SLOT_BAG_START; i < INVENTORY_SLOT_BAG_END; ++i)
         if (Bag* pBag = (Bag*)GetItemByPos(INVENTORY_SLOT_BAG_0, i))
             if (Item* itemPtr = pBag->GetItemByEntry(item))
@@ -9370,11 +9285,6 @@ Item* Player::GetItemByLimitedCategory(uint32 limitedCategory) const
             if (pItem->GetProto()->ItemLimitCategory == limitedCategory)
                 return pItem;
 
-    for (int i = KEYRING_SLOT_START; i < CURRENCYTOKEN_SLOT_END; ++i)
-        if (Item* pItem = GetItemByPos(INVENTORY_SLOT_BAG_0, i))
-            if (pItem->GetProto()->ItemLimitCategory == limitedCategory)
-                return pItem;
-
     for (int i = INVENTORY_SLOT_BAG_START; i < INVENTORY_SLOT_BAG_END; ++i)
         if (Bag* pBag = (Bag*)GetItemByPos(INVENTORY_SLOT_BAG_0, i))
             if (Item* itemPtr = pBag->GetItemByLimitedCategory(limitedCategory))
@@ -9386,11 +9296,6 @@ Item* Player::GetItemByLimitedCategory(uint32 limitedCategory) const
 Item* Player::GetItemByGuid(ObjectGuid guid) const
 {
     for (int i = EQUIPMENT_SLOT_START; i < INVENTORY_SLOT_ITEM_END; ++i)
-        if (Item* pItem = GetItemByPos(INVENTORY_SLOT_BAG_0, i))
-            if (pItem->GetObjectGuid() == guid)
-                return pItem;
-
-    for (int i = KEYRING_SLOT_START; i < CURRENCYTOKEN_SLOT_END; ++i)
         if (Item* pItem = GetItemByPos(INVENTORY_SLOT_BAG_0, i))
             if (pItem->GetObjectGuid() == guid)
                 return pItem;
@@ -9426,7 +9331,7 @@ Item* Player::GetItemByPos(uint16 pos) const
 
 Item* Player::GetItemByPos(uint8 bag, uint8 slot) const
 {
-    if (bag == INVENTORY_SLOT_BAG_0 && (slot < BANK_SLOT_BAG_END || (slot >= KEYRING_SLOT_START && slot < CURRENCYTOKEN_SLOT_END)))
+    if (bag == INVENTORY_SLOT_BAG_0 && slot < BANK_SLOT_BAG_END)
         return m_items[slot];
     else if ((bag >= INVENTORY_SLOT_BAG_START && bag < INVENTORY_SLOT_BAG_END)
              || (bag >= BANK_SLOT_BAG_START && bag < BANK_SLOT_BAG_END))
@@ -9506,8 +9411,6 @@ bool Player::IsInventoryPos(uint8 bag, uint8 slot)
         return true;
     if (bag >= INVENTORY_SLOT_BAG_START && bag < INVENTORY_SLOT_BAG_END)
         return true;
-    if (bag == INVENTORY_SLOT_BAG_0 && (slot >= KEYRING_SLOT_START && slot < CURRENCYTOKEN_SLOT_END))
-        return true;
     return false;
 }
 
@@ -9566,10 +9469,6 @@ bool Player::IsValidPos(uint8 bag, uint8 slot, bool explicit_pos) const
         if (slot >= INVENTORY_SLOT_ITEM_START && slot < INVENTORY_SLOT_ITEM_END)
             return true;
 
-        // keyring slots
-        if (slot >= KEYRING_SLOT_START && slot < KEYRING_SLOT_END)
-            return true;
-
         // bank main slots
         if (slot >= BANK_SLOT_ITEM_START && slot < BANK_SLOT_ITEM_END)
             return true;
@@ -9618,16 +9517,6 @@ bool Player::HasItemCount(uint32 item, uint32 count, bool inBankAlso) const
 {
     uint32 tempcount = 0;
     for (int i = EQUIPMENT_SLOT_START; i < INVENTORY_SLOT_ITEM_END; ++i)
-    {
-        Item* pItem = GetItemByPos(INVENTORY_SLOT_BAG_0, i);
-        if (pItem && pItem->GetEntry() == item && !pItem->IsInTrade())
-        {
-            tempcount += pItem->GetCount();
-            if (tempcount >= count)
-                return true;
-        }
-    }
-    for (int i = KEYRING_SLOT_START; i < CURRENCYTOKEN_SLOT_END; ++i)
     {
         Item* pItem = GetItemByPos(INVENTORY_SLOT_BAG_0, i);
         if (pItem && pItem->GetEntry() == item && !pItem->IsInTrade())
@@ -9809,36 +9698,6 @@ InventoryResult Player::_CanTakeMoreSimilarItems(uint32 entry, uint32 count, Ite
     return EQUIP_ERR_OK;
 }
 
-bool Player::HasItemTotemCategory(uint32 TotemCategory) const
-{
-    Item* pItem;
-    for (uint8 i = EQUIPMENT_SLOT_START; i < INVENTORY_SLOT_ITEM_END; ++i)
-    {
-        pItem = GetItemByPos(INVENTORY_SLOT_BAG_0, i);
-        if (pItem && IsTotemCategoryCompatiableWith(pItem->GetProto()->TotemCategory, TotemCategory))
-            return true;
-    }
-    for (uint8 i = KEYRING_SLOT_START; i < CURRENCYTOKEN_SLOT_END; ++i)
-    {
-        pItem = GetItemByPos(INVENTORY_SLOT_BAG_0, i);
-        if (pItem && IsTotemCategoryCompatiableWith(pItem->GetProto()->TotemCategory, TotemCategory))
-            return true;
-    }
-    for (uint8 i = INVENTORY_SLOT_BAG_START; i < INVENTORY_SLOT_BAG_END; ++i)
-    {
-        if (Bag* pBag = (Bag*)GetItemByPos(INVENTORY_SLOT_BAG_0, i))
-        {
-            for (uint32 j = 0; j < pBag->GetBagSize(); ++j)
-            {
-                pItem = GetItemByPos(i, j);
-                if (pItem && IsTotemCategoryCompatiableWith(pItem->GetProto()->TotemCategory, TotemCategory))
-                    return true;
-            }
-        }
-    }
-    return false;
-}
-
 InventoryResult Player::_CanStoreItem_InSpecificSlot(uint8 bag, uint8 slot, ItemPosCountVec& dest, ItemPrototype const* pProto, uint32& count, bool swap, Item* pSrcItem) const
 {
     Item* pItem2 = GetItemByPos(bag, slot);
@@ -9854,14 +9713,6 @@ InventoryResult Player::_CanStoreItem_InSpecificSlot(uint8 bag, uint8 slot, Item
     {
         if (bag == INVENTORY_SLOT_BAG_0)
         {
-            // keyring case
-            if (slot >= KEYRING_SLOT_START && slot < KEYRING_SLOT_START + GetMaxKeyringSize() && !(pProto->BagFamily & BAG_FAMILY_MASK_KEYS))
-                return EQUIP_ERR_ITEM_DOESNT_GO_INTO_BAG;
-
-            // currencytoken case
-            if (slot >= CURRENCYTOKEN_SLOT_START && slot < CURRENCYTOKEN_SLOT_END && !(pProto->BagFamily & BAG_FAMILY_MASK_CURRENCY_TOKENS))
-                return EQUIP_ERR_ITEM_DOESNT_GO_INTO_BAG;
-
             // prevent cheating
             if ((slot >= BUYBACK_SLOT_START && slot < BUYBACK_SLOT_END) || slot >= PLAYER_SLOT_END)
                 return EQUIP_ERR_ITEM_DOESNT_GO_INTO_BAG;
@@ -10100,24 +9951,6 @@ InventoryResult Player::_CanStoreItem(uint8 bag, uint8 slot, ItemPosCountVec& de
         {
             if (bag == INVENTORY_SLOT_BAG_0)               // inventory
             {
-                res = _CanStoreItem_InInventorySlots(KEYRING_SLOT_START, CURRENCYTOKEN_SLOT_END, dest, pProto, count, true, pItem, bag, slot);
-                if (res != EQUIP_ERR_OK)
-                {
-                    if (no_space_count)
-                        *no_space_count = count + no_similar_count;
-                    return res;
-                }
-
-                if (count == 0)
-                {
-                    if (no_similar_count == 0)
-                        return EQUIP_ERR_OK;
-
-                    if (no_space_count)
-                        *no_space_count = count + no_similar_count;
-                    return EQUIP_ERR_CANT_CARRY_MORE_OF_THIS;
-                }
-
                 res = _CanStoreItem_InInventorySlots(INVENTORY_SLOT_ITEM_START, INVENTORY_SLOT_ITEM_END, dest, pProto, count, true, pItem, bag, slot);
                 if (res != EQUIP_ERR_OK)
                 {
@@ -10165,67 +9998,6 @@ InventoryResult Player::_CanStoreItem(uint8 bag, uint8 slot, ItemPosCountVec& de
         // search free slot in bag for place to
         if (bag == INVENTORY_SLOT_BAG_0)                    // inventory
         {
-            // search free slot - keyring case
-            if (pProto->BagFamily & BAG_FAMILY_MASK_KEYS)
-            {
-                uint32 keyringSize = GetMaxKeyringSize();
-                res = _CanStoreItem_InInventorySlots(KEYRING_SLOT_START, KEYRING_SLOT_START + keyringSize, dest, pProto, count, false, pItem, bag, slot);
-                if (res != EQUIP_ERR_OK)
-                {
-                    if (no_space_count)
-                        *no_space_count = count + no_similar_count;
-                    return res;
-                }
-
-                if (count == 0)
-                {
-                    if (no_similar_count == 0)
-                        return EQUIP_ERR_OK;
-
-                    if (no_space_count)
-                        *no_space_count = count + no_similar_count;
-                    return EQUIP_ERR_CANT_CARRY_MORE_OF_THIS;
-                }
-
-                res = _CanStoreItem_InInventorySlots(CURRENCYTOKEN_SLOT_START, CURRENCYTOKEN_SLOT_END, dest, pProto, count, false, pItem, bag, slot);
-                if (res != EQUIP_ERR_OK)
-                {
-                    if (no_space_count)
-                        *no_space_count = count + no_similar_count;
-                    return res;
-                }
-
-                if (count == 0)
-                {
-                    if (no_similar_count == 0)
-                        return EQUIP_ERR_OK;
-
-                    if (no_space_count)
-                        *no_space_count = count + no_similar_count;
-                    return EQUIP_ERR_CANT_CARRY_MORE_OF_THIS;
-                }
-            }
-            else if (pProto->BagFamily & BAG_FAMILY_MASK_CURRENCY_TOKENS)
-            {
-                res = _CanStoreItem_InInventorySlots(CURRENCYTOKEN_SLOT_START, CURRENCYTOKEN_SLOT_END, dest, pProto, count, false, pItem, bag, slot);
-                if (res != EQUIP_ERR_OK)
-                {
-                    if (no_space_count)
-                        *no_space_count = count + no_similar_count;
-                    return res;
-                }
-
-                if (count == 0)
-                {
-                    if (no_similar_count == 0)
-                        return EQUIP_ERR_OK;
-
-                    if (no_space_count)
-                        *no_space_count = count + no_similar_count;
-                    return EQUIP_ERR_CANT_CARRY_MORE_OF_THIS;
-                }
-            }
-
             res = _CanStoreItem_InInventorySlots(INVENTORY_SLOT_ITEM_START, INVENTORY_SLOT_ITEM_END, dest, pProto, count, false, pItem, bag, slot);
             if (res != EQUIP_ERR_OK)
             {
@@ -10274,24 +10046,6 @@ InventoryResult Player::_CanStoreItem(uint8 bag, uint8 slot, ItemPosCountVec& de
     // search stack for merge to
     if (pProto->Stackable != 1)
     {
-        res = _CanStoreItem_InInventorySlots(KEYRING_SLOT_START, CURRENCYTOKEN_SLOT_END, dest, pProto, count, true, pItem, bag, slot);
-        if (res != EQUIP_ERR_OK)
-        {
-            if (no_space_count)
-                *no_space_count = count + no_similar_count;
-            return res;
-        }
-
-        if (count == 0)
-        {
-            if (no_similar_count == 0)
-                return EQUIP_ERR_OK;
-
-            if (no_space_count)
-                *no_space_count = count + no_similar_count;
-            return EQUIP_ERR_CANT_CARRY_MORE_OF_THIS;
-        }
-
         res = _CanStoreItem_InInventorySlots(INVENTORY_SLOT_ITEM_START, INVENTORY_SLOT_ITEM_END, dest, pProto, count, true, pItem, bag, slot);
         if (res != EQUIP_ERR_OK)
         {
@@ -10351,48 +10105,6 @@ InventoryResult Player::_CanStoreItem(uint8 bag, uint8 slot, ItemPosCountVec& de
     // search free slot - special bag case
     if (pProto->BagFamily)
     {
-        if (pProto->BagFamily & BAG_FAMILY_MASK_KEYS)
-        {
-            uint32 keyringSize = GetMaxKeyringSize();
-            res = _CanStoreItem_InInventorySlots(KEYRING_SLOT_START, KEYRING_SLOT_START + keyringSize, dest, pProto, count, false, pItem, bag, slot);
-            if (res != EQUIP_ERR_OK)
-            {
-                if (no_space_count)
-                    *no_space_count = count + no_similar_count;
-                return res;
-            }
-
-            if (count == 0)
-            {
-                if (no_similar_count == 0)
-                    return EQUIP_ERR_OK;
-
-                if (no_space_count)
-                    *no_space_count = count + no_similar_count;
-                return EQUIP_ERR_CANT_CARRY_MORE_OF_THIS;
-            }
-        }
-        else if (pProto->BagFamily & BAG_FAMILY_MASK_CURRENCY_TOKENS)
-        {
-            res = _CanStoreItem_InInventorySlots(CURRENCYTOKEN_SLOT_START, CURRENCYTOKEN_SLOT_END, dest, pProto, count, false, pItem, bag, slot);
-            if (res != EQUIP_ERR_OK)
-            {
-                if (no_space_count)
-                    *no_space_count = count + no_similar_count;
-                return res;
-            }
-
-            if (count == 0)
-            {
-                if (no_similar_count == 0)
-                    return EQUIP_ERR_OK;
-
-                if (no_space_count)
-                    *no_space_count = count + no_similar_count;
-                return EQUIP_ERR_CANT_CARRY_MORE_OF_THIS;
-            }
-        }
-
         for (int i = INVENTORY_SLOT_BAG_START; i < INVENTORY_SLOT_BAG_END; ++i)
         {
             res = _CanStoreItem_InBag(i, dest, pProto, count, false, false, pItem, bag, slot);
@@ -10465,13 +10177,9 @@ InventoryResult Player::CanStoreItems(Item** pItems, int count) const
     // fill space table
     int inv_slot_items[INVENTORY_SLOT_ITEM_END - INVENTORY_SLOT_ITEM_START];
     int inv_bags[INVENTORY_SLOT_BAG_END - INVENTORY_SLOT_BAG_START][MAX_BAG_SIZE];
-    int inv_keys[KEYRING_SLOT_END - KEYRING_SLOT_START];
-    int inv_tokens[CURRENCYTOKEN_SLOT_END - CURRENCYTOKEN_SLOT_START];
 
     memset(inv_slot_items, 0, sizeof(int) * (INVENTORY_SLOT_ITEM_END - INVENTORY_SLOT_ITEM_START));
     memset(inv_bags, 0, sizeof(int) * (INVENTORY_SLOT_BAG_END - INVENTORY_SLOT_BAG_START)*MAX_BAG_SIZE);
-    memset(inv_keys, 0, sizeof(int) * (KEYRING_SLOT_END - KEYRING_SLOT_START));
-    memset(inv_tokens, 0, sizeof(int) * (CURRENCYTOKEN_SLOT_END - CURRENCYTOKEN_SLOT_START));
 
     for (int i = INVENTORY_SLOT_ITEM_START; i < INVENTORY_SLOT_ITEM_END; ++i)
     {
@@ -10480,26 +10188,6 @@ InventoryResult Player::CanStoreItems(Item** pItems, int count) const
         if (pItem2 && !pItem2->IsInTrade())
         {
             inv_slot_items[i - INVENTORY_SLOT_ITEM_START] = pItem2->GetCount();
-        }
-    }
-
-    for (int i = KEYRING_SLOT_START; i < KEYRING_SLOT_END; ++i)
-    {
-        pItem2 = GetItemByPos(INVENTORY_SLOT_BAG_0, i);
-
-        if (pItem2 && !pItem2->IsInTrade())
-        {
-            inv_keys[i - KEYRING_SLOT_START] = pItem2->GetCount();
-        }
-    }
-
-    for (int i = CURRENCYTOKEN_SLOT_START; i < CURRENCYTOKEN_SLOT_END; ++i)
-    {
-        pItem2 = GetItemByPos(INVENTORY_SLOT_BAG_0, i);
-
-        if (pItem2 && !pItem2->IsInTrade())
-        {
-            inv_tokens[i - CURRENCYTOKEN_SLOT_START] = pItem2->GetCount();
         }
     }
 
@@ -10554,30 +10242,6 @@ InventoryResult Player::CanStoreItems(Item** pItems, int count) const
         {
             bool b_found = false;
 
-            for (int t = KEYRING_SLOT_START; t < KEYRING_SLOT_END; ++t)
-            {
-                pItem2 = GetItemByPos(INVENTORY_SLOT_BAG_0, t);
-                if (pItem2 && pItem2->CanBeMergedPartlyWith(pProto) == EQUIP_ERR_OK && inv_keys[t - KEYRING_SLOT_START] + pItem->GetCount() <= pProto->GetMaxStackSize())
-                {
-                    inv_keys[t - KEYRING_SLOT_START] += pItem->GetCount();
-                    b_found = true;
-                    break;
-                }
-            }
-            if (b_found) continue;
-
-            for (int t = CURRENCYTOKEN_SLOT_START; t < CURRENCYTOKEN_SLOT_END; ++t)
-            {
-                pItem2 = GetItemByPos(INVENTORY_SLOT_BAG_0, t);
-                if (pItem2 && pItem2->CanBeMergedPartlyWith(pProto) == EQUIP_ERR_OK && inv_tokens[t - CURRENCYTOKEN_SLOT_START] + pItem->GetCount() <= pProto->GetMaxStackSize())
-                {
-                    inv_tokens[t - CURRENCYTOKEN_SLOT_START] += pItem->GetCount();
-                    b_found = true;
-                    break;
-                }
-            }
-            if (b_found) continue;
-
             for (int t = INVENTORY_SLOT_ITEM_START; t < INVENTORY_SLOT_ITEM_END; ++t)
             {
                 pItem2 = GetItemByPos(INVENTORY_SLOT_BAG_0, t);
@@ -10614,36 +10278,6 @@ InventoryResult Player::CanStoreItems(Item** pItems, int count) const
         if (pProto->BagFamily)
         {
             bool b_found = false;
-            if (pProto->BagFamily & BAG_FAMILY_MASK_KEYS)
-            {
-                uint32 keyringSize = GetMaxKeyringSize();
-                for (uint32 t = KEYRING_SLOT_START; t < KEYRING_SLOT_START + keyringSize; ++t)
-                {
-                    if (inv_keys[t - KEYRING_SLOT_START] == 0)
-                    {
-                        inv_keys[t - KEYRING_SLOT_START] = 1;
-                        b_found = true;
-                        break;
-                    }
-                }
-            }
-
-            if (b_found) continue;
-
-            if (pProto->BagFamily & BAG_FAMILY_MASK_CURRENCY_TOKENS)
-            {
-                for (uint32 t = CURRENCYTOKEN_SLOT_START; t < CURRENCYTOKEN_SLOT_END; ++t)
-                {
-                    if (inv_tokens[t - CURRENCYTOKEN_SLOT_START] == 0)
-                    {
-                        inv_tokens[t - CURRENCYTOKEN_SLOT_START] = 1;
-                        b_found = true;
-                        break;
-                    }
-                }
-            }
-
-            if (b_found) continue;
 
             for (int t = INVENTORY_SLOT_BAG_START; !b_found && t < INVENTORY_SLOT_BAG_END; ++t)
             {
@@ -10800,7 +10434,7 @@ InventoryResult Player::CanEquipItem(uint8 slot, uint16& dest, Item* pItem, bool
                 return EQUIP_ERR_NO_EQUIPMENT_SLOT_AVAILABLE;
 
             // if swap ignore item (equipped also)
-            if (InventoryResult res2 = CanEquipUniqueItem(pItem, swap ? eslot : NULL_SLOT))
+            if (InventoryResult res2 = CanEquipUniqueItem(pItem, swap ? eslot : uint8(NULL_SLOT)))
                 return res2;
 
             // check unique-equipped special item classes
@@ -11351,10 +10985,6 @@ Item* Player::_StoreItem(uint16 pos, Item* pItem, uint32 count, bool clone, bool
             pItem->SetSlot(slot);
             pItem->SetContainer(NULL);
 
-            // need update known currency
-            if (slot >= CURRENCYTOKEN_SLOT_START && slot < CURRENCYTOKEN_SLOT_END)
-                UpdateKnownCurrencies(pItem->GetEntry(), true);
-
             if (IsInWorld() && update)
             {
                 pItem->AddToWorld();
@@ -11656,9 +11286,6 @@ void Player::RemoveItem(uint8 bag, uint8 slot, bool update)
                     }
                 }
             }
-            // need update known currency
-            else if (slot >= CURRENCYTOKEN_SLOT_START && slot < CURRENCYTOKEN_SLOT_END)
-                UpdateKnownCurrencies(pItem->GetEntry(), false);
 
             m_items[slot] = NULL;
             SetGuidValue(PLAYER_FIELD_INV_SLOT_HEAD + (slot * 2), ObjectGuid());
@@ -11798,9 +11425,6 @@ void Player::DestroyItem(uint8 bag, uint8 slot, bool update)
                 // equipment visual show
                 SetVisibleItemSlot(slot, NULL);
             }
-            // need update known currency
-            else if (slot >= CURRENCYTOKEN_SLOT_START && slot < CURRENCYTOKEN_SLOT_END)
-                UpdateKnownCurrencies(pItem->GetEntry(), false);
 
             m_items[slot] = NULL;
         }
@@ -11835,34 +11459,6 @@ void Player::DestroyItemCount(uint32 item, uint32 count, bool update, bool unequ
                 if (pItem->GetCount() + remcount <= count)
                 {
                     // all items in inventory can unequipped
-                    remcount += pItem->GetCount();
-                    DestroyItem(INVENTORY_SLOT_BAG_0, i, update);
-
-                    if (remcount >= count)
-                        return;
-                }
-                else
-                {
-                    ItemRemovedQuestCheck(pItem->GetEntry(), count - remcount);
-                    pItem->SetCount(pItem->GetCount() - count + remcount);
-                    if (IsInWorld() && update)
-                        pItem->SendCreateUpdateToPlayer(this);
-                    pItem->SetState(ITEM_CHANGED, this);
-                    return;
-                }
-            }
-        }
-    }
-
-    for (int i = KEYRING_SLOT_START; i < CURRENCYTOKEN_SLOT_END; ++i)
-    {
-        if (Item* pItem = GetItemByPos(INVENTORY_SLOT_BAG_0, i))
-        {
-            if (pItem->GetEntry() == item && !pItem->IsInTrade())
-            {
-                if (pItem->GetCount() + remcount <= count)
-                {
-                    // all keys can be unequipped
                     remcount += pItem->GetCount();
                     DestroyItem(INVENTORY_SLOT_BAG_0, i, update);
 
@@ -12014,11 +11610,6 @@ void Player::DestroyZoneLimitedItem(bool update, uint32 new_zone)
 
     // in inventory
     for (int i = INVENTORY_SLOT_ITEM_START; i < INVENTORY_SLOT_ITEM_END; ++i)
-        if (Item* pItem = GetItemByPos(INVENTORY_SLOT_BAG_0, i))
-            if (pItem->IsLimitedToAnotherMapOrZone(GetMapId(), new_zone))
-                DestroyItem(INVENTORY_SLOT_BAG_0, i, update);
-
-    for (int i = KEYRING_SLOT_START; i < CURRENCYTOKEN_SLOT_END; ++i)
         if (Item* pItem = GetItemByPos(INVENTORY_SLOT_BAG_0, i))
             if (pItem->IsLimitedToAnotherMapOrZone(GetMapId(), new_zone))
                 DestroyItem(INVENTORY_SLOT_BAG_0, i, update);
@@ -13551,32 +13142,33 @@ uint32 Player::GetGossipTextId(uint32 menuId, WorldObject* pSource)
     if (!menuId)
         return textId;
 
-    GossipMenusMapBounds pMenuBounds = sObjectMgr.GetGossipMenusMapBounds(menuId);
+    uint32 scriptId = 0;
+    uint32 lastConditionId = 0;
 
+    GossipMenusMapBounds pMenuBounds = sObjectMgr.GetGossipMenusMapBounds(menuId);
     for (GossipMenusMap::const_iterator itr = pMenuBounds.first; itr != pMenuBounds.second; ++itr)
     {
-        if (itr->second.conditionId && sObjectMgr.IsPlayerMeetToNEWCondition(this, itr->second.conditionId))
+        // Take the text that has the highest conditionId of all fitting
+        // TODO: Simplify logic to (!itr->second.conditionId && !lastConditionId) || <lineBelow>)
+        if (itr->second.conditionId > lastConditionId && sObjectMgr.IsPlayerMeetToNEWCondition(this, itr->second.conditionId))
         {
+            lastConditionId = itr->second.conditionId;
             textId = itr->second.text_id;
-
-            // Start related script
-            if (itr->second.script_id)
-                GetMap()->ScriptsStart(sGossipScripts, itr->second.script_id, this, pSource);
-            break;
+            scriptId = itr->second.script_id;
         }
-        else if (!itr->second.conditionId)
+        else if (!itr->second.conditionId && !lastConditionId)
         {
             if (sObjectMgr.IsPlayerMeetToCondition(this, itr->second.cond_1) && sObjectMgr.IsPlayerMeetToCondition(this, itr->second.cond_2))
             {
                 textId = itr->second.text_id;
-
-                // Start related script
-                if (itr->second.script_id)
-                    GetMap()->ScriptsStart(sGossipScripts, itr->second.script_id, this, pSource);
-                break;
+                scriptId = itr->second.script_id;
             }
         }
     }
+
+    // Start related script
+    if (scriptId)
+        GetMap()->ScriptsStart(sGossipScripts, scriptId, this, pSource);
 
     return textId;
 }
@@ -14727,7 +14319,7 @@ bool Player::SatisfyQuestDay(Quest const* qInfo, bool msg) const
     return true;
 }
 
-bool Player::SatisfyQuestWeek(Quest const* qInfo, bool msg) const
+bool Player::SatisfyQuestWeek(Quest const* qInfo, bool /*msg*/) const
 {
     if (!qInfo->IsWeekly() || m_weeklyquests.empty())
         return true;
@@ -14736,7 +14328,7 @@ bool Player::SatisfyQuestWeek(Quest const* qInfo, bool msg) const
     return m_weeklyquests.find(qInfo->GetQuestId()) == m_weeklyquests.end();
 }
 
-bool Player::SatisfyQuestMonth(Quest const* qInfo, bool msg) const
+bool Player::SatisfyQuestMonth(Quest const* qInfo, bool /*msg*/) const
 {
     if (!qInfo->IsMonthly() || m_monthlyquests.empty())
         return true;
@@ -15359,7 +14951,7 @@ void Player::SendQuestCompleteEvent(uint32 quest_id)
     }
 }
 
-void Player::SendQuestReward(Quest const* pQuest, uint32 XP, Object* questGiver)
+void Player::SendQuestReward(Quest const* pQuest, uint32 XP, Object* /*questGiver*/)
 {
     uint32 questid = pQuest->GetQuestId();
     DEBUG_LOG("WORLD: Sent SMSG_QUESTGIVER_QUEST_COMPLETE quest = %u", questid);
@@ -15636,11 +15228,11 @@ bool Player::LoadFromDB(ObjectGuid guid, SqlQueryHolder* holder)
     // SELECT guid, account, name, race, class, gender, level, xp, money, playerBytes, playerBytes2, playerFlags,"
     // 12          13          14          15   16           17        18         19         20         21          22           23                 24
     //"position_x, position_y, position_z, map, orientation, taximask, cinematic, totaltime, leveltime, rest_bonus, logout_time, is_logout_resting, resettalents_cost,"
-    // 25                 26       27       28       29       30         31           32            33        34    35      36                 37         38
-    //"resettalents_time, trans_x, trans_y, trans_z, trans_o, transguid, extra_flags, stable_slots, at_login, zone, online, death_expire_time, taxi_path, dungeon_difficulty,"
-    // 39           40                41                42                    43          44          45              46           47               48              49
-    //"arenaPoints, totalHonorPoints, todayHonorPoints, yesterdayHonorPoints, totalKills, todayKills, yesterdayKills, chosenTitle, knownCurrencies, watchedFaction, drunk,"
-    // 50      51      52      53      54      55      56         57          58             59              60           61          62
+    // 25                 26             27       28       29       30       31         32           33            34        35    36      37                 38         39
+    //"resettalents_time, primary_trees, trans_x, trans_y, trans_z, trans_o, transguid, extra_flags, stable_slots, at_login, zone, online, death_expire_time, taxi_path, dungeon_difficulty,"
+    // 40          41          42              43           44              45
+    //"totalKills, todayKills, yesterdayKills, chosenTitle, watchedFaction, drunk,"
+    // 46      47      48      49      50      51      52         53          54             55              56           57          58
     //"health, power1, power2, power3, power4, power5, specCount, activeSpec, exploredZones, equipmentCache, knownTitles, actionBars, slot FROM characters WHERE guid = '%u'", GUID_LOPART(m_guid));
     QueryResult *result = holder->GetResult(PLAYER_LOGIN_QUERY_LOADFROM);
 
@@ -15691,8 +15283,8 @@ bool Player::LoadFromDB(ObjectGuid guid, SqlQueryHolder* holder)
     SetUInt32Value(UNIT_FIELD_LEVEL, fields[6].GetUInt8());
     SetUInt32Value(PLAYER_XP, fields[7].GetUInt32());
 
-    _LoadIntoDataField(fields[58].GetString(), PLAYER_EXPLORED_ZONES_1, PLAYER_EXPLORED_ZONES_SIZE);
-    _LoadIntoDataField(fields[60].GetString(), PLAYER__FIELD_KNOWN_TITLES, KNOWN_TITLES_SIZE*2);
+    _LoadIntoDataField(fields[54].GetString(), PLAYER_EXPLORED_ZONES_1, PLAYER_EXPLORED_ZONES_SIZE);
+    _LoadIntoDataField(fields[56].GetString(), PLAYER__FIELD_KNOWN_TITLES, KNOWN_TITLES_SIZE*2);
 
     InitDisplayIds();                                       // model, scale and model data
 
@@ -15710,19 +15302,17 @@ bool Player::LoadFromDB(ObjectGuid guid, SqlQueryHolder* holder)
     SetUInt32Value(PLAYER_BYTES, fields[9].GetUInt32());
     SetUInt32Value(PLAYER_BYTES_2, fields[10].GetUInt32());
 
-    m_drunk = fields[49].GetUInt16();
+    m_drunk = fields[45].GetUInt16();
 
     SetUInt16Value(PLAYER_BYTES_3, 0, (m_drunk & 0xFFFE) | gender);
 
     SetUInt32Value(PLAYER_FLAGS, fields[11].GetUInt32());
-    SetInt32Value(PLAYER_FIELD_WATCHED_FACTION_INDEX, fields[48].GetInt32());
-
-    //SetUInt64Value(PLAYER_FIELD_KNOWN_CURRENCIES, fields[47].GetUInt64());
+    SetInt32Value(PLAYER_FIELD_WATCHED_FACTION_INDEX, fields[44].GetInt32());
 
     // Action bars state
-    SetByteValue(PLAYER_FIELD_BYTES, 2, fields[61].GetUInt8());
+    SetByteValue(PLAYER_FIELD_BYTES, 2, fields[57].GetUInt8());
 
-    m_slot = fields[62].GetUInt8();
+    m_slot = fields[58].GetUInt8();
 
     // cleanup inventory related item value fields (its will be filled correctly in _LoadInventory)
     for (uint8 slot = EQUIPMENT_SLOT_START; slot < EQUIPMENT_SLOT_END; ++slot)
@@ -15752,11 +15342,11 @@ bool Player::LoadFromDB(ObjectGuid guid, SqlQueryHolder* holder)
     InitPrimaryProfessions();                               // to max set before any spell loaded
 
     // init saved position, and fix it later if problematic
-    uint32 transGUID = fields[30].GetUInt32();
+    uint32 transGUID = fields[31].GetUInt32();
     Relocate(fields[12].GetFloat(), fields[13].GetFloat(), fields[14].GetFloat(), fields[16].GetFloat());
     SetLocationMapId(fields[15].GetUInt32());
 
-    uint32 difficulty = fields[38].GetUInt32();
+    uint32 difficulty = fields[39].GetUInt32();
     if (difficulty >= MAX_DUNGEON_DIFFICULTY)
         difficulty = DUNGEON_DIFFICULTY_NORMAL;
     SetDungeonDifficulty(Difficulty(difficulty));           // may be changed in _LoadGroup
@@ -15764,8 +15354,6 @@ bool Player::LoadFromDB(ObjectGuid guid, SqlQueryHolder* holder)
     _LoadGroup(holder->GetResult(PLAYER_LOGIN_QUERY_LOADGROUP));
 
     _LoadArenaTeamInfo(holder->GetResult(PLAYER_LOGIN_QUERY_LOADARENAINFO));
-
-    SetArenaPoints(fields[39].GetUInt32());
 
     // check arena teams integrity
     for (uint32 arena_slot = 0; arena_slot < MAX_ARENA_SLOT; ++arena_slot)
@@ -15783,13 +15371,9 @@ bool Player::LoadFromDB(ObjectGuid guid, SqlQueryHolder* holder)
             SetArenaTeamInfoField(arena_slot, ArenaTeamInfoType(j), 0);
     }
 
-    SetHonorPoints(fields[40].GetUInt32());
-
-    //SetUInt32Value(PLAYER_FIELD_TODAY_CONTRIBUTION, fields[41].GetUInt32());
-    //SetUInt32Value(PLAYER_FIELD_YESTERDAY_CONTRIBUTION, fields[42].GetUInt32());
-    SetUInt32Value(PLAYER_FIELD_LIFETIME_HONORBALE_KILLS, fields[43].GetUInt32());
-    SetUInt16Value(PLAYER_FIELD_KILLS, 0, fields[44].GetUInt16());
-    SetUInt16Value(PLAYER_FIELD_KILLS, 1, fields[45].GetUInt16());
+    SetUInt32Value(PLAYER_FIELD_LIFETIME_HONORBALE_KILLS, fields[40].GetUInt32());
+    SetUInt16Value(PLAYER_FIELD_KILLS, 0, fields[41].GetUInt16()); // today
+    SetUInt16Value(PLAYER_FIELD_KILLS, 1, fields[42].GetUInt16()); // yesterday
 
     _LoadBoundInstances(holder->GetResult(PLAYER_LOGIN_QUERY_LOADBOUNDINSTANCES));
 
@@ -15862,7 +15446,7 @@ bool Player::LoadFromDB(ObjectGuid guid, SqlQueryHolder* holder)
 
     if (transGUID != 0)
     {
-        m_movementInfo.SetTransportData(ObjectGuid(HIGHGUID_MO_TRANSPORT, transGUID), fields[26].GetFloat(), fields[27].GetFloat(), fields[28].GetFloat(), fields[29].GetFloat(), 0, -1);
+        m_movementInfo.SetTransportData(ObjectGuid(HIGHGUID_MO_TRANSPORT, transGUID), fields[27].GetFloat(), fields[28].GetFloat(), fields[29].GetFloat(), fields[30].GetFloat(), 0, -1);
 
         if (!MaNGOS::IsValidMapCoord(
                     GetPositionX() + m_movementInfo.GetTransportPos()->x, GetPositionY() + m_movementInfo.GetTransportPos()->y,
@@ -15975,27 +15559,26 @@ bool Player::LoadFromDB(ObjectGuid guid, SqlQueryHolder* holder)
 
     m_taxi.LoadTaxiMask(fields[17].GetString());            // must be before InitTaxiNodesForLevel
 
-    uint32 extraflags = fields[31].GetUInt32();
+    uint32 extraflags = fields[32].GetUInt32();
 
-    m_stableSlots = fields[32].GetUInt32();
+    m_stableSlots = fields[33].GetUInt32();
     if (m_stableSlots > MAX_PET_STABLES)
     {
         sLog.outError("Player can have not more %u stable slots, but have in DB %u", MAX_PET_STABLES, uint32(m_stableSlots));
         m_stableSlots = MAX_PET_STABLES;
     }
 
-    m_atLoginFlags = fields[33].GetUInt32();
+    m_atLoginFlags = fields[34].GetUInt32();
 
-    // Honor system
     // Update Honor kills data
-    m_lastHonorUpdateTime = logoutTime;
-    UpdateHonorFields();
+    m_lastHonorKillsUpdateTime = logoutTime;
+    UpdateHonorKills();
 
-    m_deathExpireTime = (time_t)fields[36].GetUInt64();
+    m_deathExpireTime = (time_t)fields[37].GetUInt64();
     if (m_deathExpireTime > now + MAX_DEATH_COUNT * DEATH_EXPIRE_STEP)
         m_deathExpireTime = now + MAX_DEATH_COUNT * DEATH_EXPIRE_STEP - 1;
 
-    std::string taxi_nodes = fields[37].GetCppString();
+    std::string taxi_nodes = fields[38].GetCppString();
 
     // clear channel spell data (if saved at channel spell casting)
     SetChannelObjectGuid(ObjectGuid());
@@ -16057,8 +15640,8 @@ bool Player::LoadFromDB(ObjectGuid guid, SqlQueryHolder* holder)
     _LoadMailedItems(holder->GetResult(PLAYER_LOGIN_QUERY_LOADMAILEDITEMS));
     UpdateNextMailTimeAndUnreads();
 
-    m_specsCount = fields[56].GetUInt8();
-    m_activeSpec = fields[57].GetUInt8();
+    m_specsCount = fields[52].GetUInt8();
+    m_activeSpec = fields[53].GetUInt8();
 
     _LoadGlyphs(holder->GetResult(PLAYER_LOGIN_QUERY_LOADGLYPHS));
 
@@ -16069,6 +15652,7 @@ bool Player::LoadFromDB(ObjectGuid guid, SqlQueryHolder* holder)
     if (HasFlag(PLAYER_FLAGS, PLAYER_FLAGS_GHOST))
         m_deathState = DEAD;
 
+    _LoadCurrencies(holder->GetResult(PLAYER_LOGIN_QUERY_LOADCURRENCIES));
     _LoadSpells(holder->GetResult(PLAYER_LOGIN_QUERY_LOADSPELLS));
 
     // after spell load, learn rewarded spell if need also
@@ -16098,7 +15682,7 @@ bool Player::LoadFromDB(ObjectGuid guid, SqlQueryHolder* holder)
 
     // check PLAYER_CHOSEN_TITLE compatibility with PLAYER__FIELD_KNOWN_TITLES
     // note: PLAYER__FIELD_KNOWN_TITLES updated at quest status loaded
-    uint32 curTitle = fields[46].GetUInt32();
+    uint32 curTitle = fields[43].GetUInt32();
     if (curTitle && !HasTitle(curTitle))
         curTitle = 0;
 
@@ -16166,18 +15750,32 @@ bool Player::LoadFromDB(ObjectGuid guid, SqlQueryHolder* holder)
     UpdateAllStats();
 
     // restore remembered power/health values (but not more max values)
-    uint32 savedhealth = fields[50].GetUInt32();
+    uint32 savedhealth = fields[46].GetUInt32();
     SetHealth(savedhealth > GetMaxHealth() ? GetMaxHealth() : savedhealth);
 
     static_assert(MAX_STORED_POWERS == 5, "Query not updated.");
     for (uint32 i = 0; i < MAX_STORED_POWERS; ++i)
     {
-        uint32 savedpower = fields[51 + i].GetUInt32();
+        uint32 savedpower = fields[47 + i].GetUInt32();
         SetPowerByIndex(i, std::min(savedpower, GetMaxPowerByIndex(i)));
     }
 
     DEBUG_FILTER_LOG(LOG_FILTER_PLAYER_STATS, "The value of player %s after load item and aura is: ", m_name.c_str());
     outDebugStatsValues();
+
+    // must be after loading spells and talents
+    Tokens talentTrees = StrSplit(fields[26].GetString(), " ");
+    for (uint8 i = 0; i < MAX_TALENT_SPEC_COUNT; ++i)
+    {
+        if (i >= talentTrees.size())
+            break;
+
+        uint32 talentTree = atol(talentTrees[i].c_str());
+        if (sTalentTabStore.LookupEntry(talentTree))
+            m_talentsPrimaryTree[i] = talentTree;
+        else if (i == m_activeSpec)
+            SetAtLoginFlag(AT_LOGIN_RESET_TALENTS); // invalid tree, reset talents
+    }
 
     // all fields read
     delete result;
@@ -16448,8 +16046,6 @@ void Player::_LoadGlyphs(QueryResult* result)
     while (result->NextRow());
 
     delete result;
-
-
 }
 
 void Player::LoadCorpse()
@@ -17476,7 +17072,7 @@ void Player::SaveToDB()
     }
 
     // first save/honor gain after midnight will also update the player's honor fields
-    UpdateHonorFields();
+    UpdateHonorKills();
 
     DEBUG_FILTER_LOG(LOG_FILTER_PLAYER_STATS, "The value of player %s at save: ", m_name.c_str());
     outDebugStatsValues();
@@ -17492,18 +17088,18 @@ void Player::SaveToDB()
     SqlStatement uberInsert = CharacterDatabase.CreateStatement(insChar, "INSERT INTO characters (guid,account,name,race,class,gender,level,xp,money,playerBytes,playerBytes2,playerFlags,"
         "map, dungeon_difficulty, position_x, position_y, position_z, orientation, "
         "taximask, online, cinematic, "
-        "totaltime, leveltime, rest_bonus, logout_time, is_logout_resting, resettalents_cost, resettalents_time, "
+        "totaltime, leveltime, rest_bonus, logout_time, is_logout_resting, resettalents_cost, resettalents_time, primary_trees, "
         "trans_x, trans_y, trans_z, trans_o, transguid, extra_flags, stable_slots, at_login, zone, "
-        "death_expire_time, taxi_path, arenaPoints, totalHonorPoints, todayHonorPoints, yesterdayHonorPoints, totalKills, "
-        "todayKills, yesterdayKills, chosenTitle, knownCurrencies, watchedFaction, drunk, health, power1, power2, power3, "
+        "death_expire_time, taxi_path, totalKills, "
+        "todayKills, yesterdayKills, chosenTitle, watchedFaction, drunk, health, power1, power2, power3, "
         "power4, power5, specCount, activeSpec, exploredZones, equipmentCache, knownTitles, actionBars, slot) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
         "?, ?, ?, ?, ?, ?, "
         "?, ?, ?, "
-        "?, ?, ?, ?, ?, ?, ?, "
+        "?, ?, ?, ?, ?, ?, ?, ?, "
         "?, ?, ?, ?, ?, ?, ?, ?, ?, "
-        "?, ?, ?, ?, ?, ?, ?, "
-        "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+        "?, ?, ?, "
+        "?, ?, ?, ?, ?, ?, ?, ?, ?, "
         "?, ?, ?, ?, ?, ?, ?, ?, ?) ");
 
     uberInsert.addUInt32(GetGUIDLow());
@@ -17556,6 +17152,10 @@ void Player::SaveToDB()
     // save, but in tavern/city
     uberInsert.addUInt32(m_resetTalentsCost);
     uberInsert.addUInt64(uint64(m_resetTalentsTime));
+    ss.str("");
+    for (int i = 0; i < MAX_TALENT_SPEC_COUNT; ++i)
+        ss << m_talentsPrimaryTree[i] << " ";
+    uberInsert.addString(ss);
 
     uberInsert.addFloat(finiteAlways(m_movementInfo.GetTransportPos()->x));
     uberInsert.addFloat(finiteAlways(m_movementInfo.GetTransportPos()->y));
@@ -17579,14 +17179,6 @@ void Player::SaveToDB()
     ss << m_taxi.SaveTaxiDestinationsToString();       // string
     uberInsert.addString(ss);
 
-    uberInsert.addUInt32(GetArenaPoints());
-
-    uberInsert.addUInt32(GetHonorPoints());
-
-    uberInsert.addUInt32(0);                                // FIXME 4x GetUInt32Value(PLAYER_FIELD_TODAY_CONTRIBUTION)
-
-    uberInsert.addUInt32(0);                                // FIXME 4x GetUInt32Value(PLAYER_FIELD_YESTERDAY_CONTRIBUTION)
-
     uberInsert.addUInt32(GetUInt32Value(PLAYER_FIELD_LIFETIME_HONORBALE_KILLS));
 
     uberInsert.addUInt16(GetUInt16Value(PLAYER_FIELD_KILLS, 0));
@@ -17594,8 +17186,6 @@ void Player::SaveToDB()
     uberInsert.addUInt16(GetUInt16Value(PLAYER_FIELD_KILLS, 1));
 
     uberInsert.addUInt32(GetUInt32Value(PLAYER_CHOSEN_TITLE));
-
-    uberInsert.addUInt64(0);                                // FIXME 4x GetUInt64Value(PLAYER_FIELD_KNOWN_CURRENCIES)
 
     // FIXME: at this moment send to DB as unsigned, including unit32(-1)
     uberInsert.addUInt32(GetUInt32Value(PLAYER_FIELD_WATCHED_FACTION_INDEX));
@@ -17651,6 +17241,7 @@ void Player::SaveToDB()
     _SaveSkills();
     m_achievementMgr.SaveToDB();
     m_reputationMgr.SaveToDB();
+    _SaveCurrencies();
     _SaveEquipmentSets();
     GetSession()->SaveTutorialsData();                      // changed only while character in game
     _SaveGlyphs();
@@ -17824,20 +17415,20 @@ void Player::_SaveGlyphs()
                 {
                     SqlStatement stmt = CharacterDatabase.CreateStatement(insertGlyph, "INSERT INTO character_glyphs (guid, spec, slot, glyph) VALUES (?, ?, ?, ?)");
                     stmt.PExecute(GetGUIDLow(), spec, slot, m_glyphs[spec][slot].GetId());
+                    break;
                 }
-                break;
                 case GLYPH_CHANGED:
                 {
                     SqlStatement stmt = CharacterDatabase.CreateStatement(updateGlyph, "UPDATE character_glyphs SET glyph = ? WHERE guid = ? AND spec = ? AND slot = ?");
                     stmt.PExecute(m_glyphs[spec][slot].GetId(), GetGUIDLow(), spec, slot);
+                    break;
                 }
-                break;
                 case GLYPH_DELETED:
                 {
                     SqlStatement stmt = CharacterDatabase.CreateStatement(deleteGlyph, "DELETE FROM character_glyphs WHERE guid = ? AND spec = ? AND slot = ?");
                     stmt.PExecute(GetGUIDLow(), spec, slot);
+                    break;
                 }
-                break;
                 case GLYPH_UNCHANGED:
                     break;
             }
@@ -18883,7 +18474,7 @@ void Player::AddSpellMod(Aura* aura, bool apply)
         m_spellMods[mod->m_miscvalue].remove(aura);
 }
 
-template <class T> T Player::ApplySpellMod(uint32 spellId, SpellModOp op, T& basevalue, Spell const* spell)
+template <class T> T Player::ApplySpellMod(uint32 spellId, SpellModOp op, T& basevalue, Spell const* /*spell*/)
 {
     SpellEntry const* spellInfo = sSpellStore.LookupEntry(spellId);
     if (!spellInfo)
@@ -19422,15 +19013,26 @@ void Player::TakeExtendedCost(uint32 extendedCostId, uint32 count)
 {
     ItemExtendedCostEntry const* extendedCost = sItemExtendedCostStore.LookupEntry(extendedCostId);
 
-    if (extendedCost->reqhonorpoints)
-        ModifyHonorPoints(-int32(extendedCost->reqhonorpoints * count));
-    if (extendedCost->reqarenapoints)
-        ModifyArenaPoints(-int32(extendedCost->reqarenapoints * count));
-
     for (uint8 i = 0; i < MAX_EXTENDED_COST_ITEMS; ++i)
     {
         if (extendedCost->reqitem[i])
             DestroyItemCount(extendedCost->reqitem[i], extendedCost->reqitemcount[i] * count, true);
+    }
+
+    for (int i = 0; i < MAX_EXTENDED_COST_CURRENCIES; ++i)
+    {
+        if (extendedCost->reqcur[i] == CURRENCY_NONE)
+            continue;
+
+        if (extendedCost->IsSeasonCurrencyRequirement(i))
+            continue;
+
+        CurrencyTypesEntry const * entry = sCurrencyTypesStore.LookupEntry(extendedCost->reqcur[i]);
+        if (!entry)
+            continue;
+
+        int32 cost = int32(extendedCost->reqcurrcount[i] * count);
+        ModifyCurrencyCount(entry->ID, -cost);
     }
 }
 
@@ -19519,24 +19121,10 @@ bool Player::BuyItemFromVendorSlot(ObjectGuid vendorGuid, uint32 vendorslot, uin
 
     if (uint32 extendedCostId = crItem->ExtendedCost)
     {
-         ItemExtendedCostEntry const* iece = sItemExtendedCostStore.LookupEntry(extendedCostId);
+        ItemExtendedCostEntry const* iece = sItemExtendedCostStore.LookupEntry(extendedCostId);
         if (!iece)
         {
             sLog.outError("Item %u have wrong ExtendedCost field value %u", pProto->ItemId, extendedCostId);
-            return false;
-        }
-
-        // honor points price
-        if (GetHonorPoints() < (iece->reqhonorpoints * count))
-        {
-            SendEquipError(EQUIP_ERR_NOT_ENOUGH_HONOR_POINTS, NULL, NULL);
-            return false;
-        }
-
-        // arena points price
-        if (GetArenaPoints() < (iece->reqarenapoints * count))
-        {
-            SendEquipError(EQUIP_ERR_NOT_ENOUGH_ARENA_POINTS, NULL, NULL);
             return false;
         }
 
@@ -19546,6 +19134,29 @@ bool Player::BuyItemFromVendorSlot(ObjectGuid vendorGuid, uint32 vendorslot, uin
             if (iece->reqitem[i] && !HasItemCount(iece->reqitem[i], iece->reqitemcount[i] * count))
             {
                 SendEquipError(EQUIP_ERR_VENDOR_MISSING_TURNINS, NULL, NULL);
+                return false;
+            }
+        }
+
+        // currency price
+        for (uint8 i = 0; i < MAX_EXTENDED_COST_CURRENCIES; ++i)
+        {
+            if (iece->reqcur[i] == CURRENCY_NONE)
+                continue;
+
+            CurrencyTypesEntry const * costCurrency = sCurrencyTypesStore.LookupEntry(iece->reqcur[i]);
+            if (!costCurrency)
+            {
+                sLog.outError("Item %u has ExtendedCost %u with unexistent currency id %u", pProto->ItemId, extendedCostId, iece->reqcur[i]);
+                continue;
+            }
+
+            int32 cost = int32(iece->reqcurrcount[i] * count);
+
+            bool hasCount = iece->IsSeasonCurrencyRequirement(i) ? HasCurrencySeasonCount(iece->reqcur[i], cost) : HasCurrencyCount(iece->reqcur[i], cost);
+            if (!hasCount)
+            {
+                SendEquipError(EQUIP_ERR_VENDOR_MISSING_TURNINS, NULL);
                 return false;
             }
         }
@@ -19679,12 +19290,11 @@ bool Player::BuyCurrencyFromVendorSlot(ObjectGuid vendorGuid, uint32 vendorslot,
     if (crItem->item != currencyId)                         // store diff item (cheating)
         return false;
 
-    if (crItem->maxcount != count)
+    if (!crItem->maxcount)
     {
-        DEBUG_LOG("WORLD: BuyCurrencyFromVendorSlot - %s: count (%u) != crItem->maxcount (%u) for currency %u and player %s.",
-            vendorGuid.GetString().c_str(), count, crItem->maxcount, currencyId, GetGuidStr().c_str());
-
-        count = crItem->maxcount;
+        DEBUG_LOG("WORLD: BuyCurrencyFromVendorSlot - %s: crItem->maxcount (%u) == 0 for currency %u and player %s.",
+            vendorGuid.GetString().c_str(), crItem->maxcount, currencyId, GetGuidStr().c_str());
+        return false;
     }
 
     if (uint32 extendedCostId = crItem->ExtendedCost)
@@ -19693,20 +19303,6 @@ bool Player::BuyCurrencyFromVendorSlot(ObjectGuid vendorGuid, uint32 vendorslot,
         if (!iece)
         {
             sLog.outError("WORLD: BuyCurrencyFromVendorSlot: Currency %u have wrong ExtendedCost field value %u for %s", currencyId, extendedCostId, vendorGuid.GetString().c_str());
-            return false;
-        }
-
-        // honor points price
-        if (GetHonorPoints() < (iece->reqhonorpoints * count))
-        {
-            SendEquipError(EQUIP_ERR_NOT_ENOUGH_HONOR_POINTS, NULL, NULL);
-            return false;
-        }
-
-        // arena points price
-        if (GetArenaPoints() < (iece->reqarenapoints * count))
-        {
-            SendEquipError(EQUIP_ERR_NOT_ENOUGH_ARENA_POINTS, NULL, NULL);
             return false;
         }
 
@@ -19720,6 +19316,28 @@ bool Player::BuyCurrencyFromVendorSlot(ObjectGuid vendorGuid, uint32 vendorslot,
             }
         }
 
+        // currency price
+        for (uint8 i = 0; i < MAX_EXTENDED_COST_CURRENCIES; ++i)
+        {
+            if (iece->reqcur[i] == CURRENCY_NONE)
+                continue;
+
+            CurrencyTypesEntry const * costCurrency = sCurrencyTypesStore.LookupEntry(iece->reqcur[i]);
+            if (!costCurrency)
+            {
+                sLog.outError("Currency %u has ExtendedCost %u with unexistent currency id %u", currencyId, extendedCostId, iece->reqcur[i]);
+                continue;
+            }
+
+            int32 cost = int32(iece->reqcurrcount[i] * count);
+            bool hasCount = iece->IsSeasonCurrencyRequirement(i) ? HasCurrencySeasonCount(iece->reqcur[i], cost) : HasCurrencyCount(iece->reqcur[i], cost);
+            if (!hasCount)
+            {
+                SendEquipError(EQUIP_ERR_VENDOR_MISSING_TURNINS, NULL);
+                return false;
+            }
+        }
+
         // check for personal arena rating requirement
         if (GetMaxPersonalArenaRatingRequirement(iece->reqarenaslot) < iece->reqpersonalarenarating)
         {
@@ -19728,13 +19346,39 @@ bool Player::BuyCurrencyFromVendorSlot(ObjectGuid vendorGuid, uint32 vendorslot,
             return false;
         }
     }
+    else
+    {
+        SendBuyError(BUY_ERR_ITEM_SOLD_OUT, 0, 0, 0);
+        return false;
+    }
 
-    // TODO: check if player already has maximum currency
+    if (uint32 totalCap = GetCurrencyTotalCap(pCurrency))
+    {
+        if (GetCurrencyCount(currencyId) >= totalCap)
+        {
 
-    // TODO: modify currency
+            SendBuyError(BUY_ERR_CANT_CARRY_MORE, 0, 0, 0);
+            return false;
+        }
+    }
 
-    DEBUG_LOG("WORLD: BuyCurrencyFromVendorSlot - %s: Player %s buys currency %u amount %u.",
-            vendorGuid.GetString().c_str(), GetGuidStr().c_str(), currencyId, count);
+    if (uint32 weekCap = GetCurrencyWeekCap(pCurrency))
+    {
+        if (GetCurrencyWeekCount(currencyId) >= weekCap)
+        {
+            SendBuyError(BUY_ERR_CANT_CARRY_MORE, 0, 0, 0);
+            return false;
+        }
+    }
+
+    if (crItem->ExtendedCost)
+        TakeExtendedCost(crItem->ExtendedCost, count);
+
+    ModifyCurrencyCount(currencyId, crItem->maxcount, true, false);
+
+
+    DEBUG_LOG("WORLD: BuyCurrencyFromVendorSlot - %s: Player %s buys currency %u amount %u count %u.",
+            vendorGuid.GetString().c_str(), GetGuidStr().c_str(), currencyId, crItem->maxcount, count);
 
     return true;
 }
@@ -20543,6 +20187,8 @@ void Player::SendInitialPacketsBeforeAddToMap()
     // set fly flag if in fly form or taxi flight to prevent visually drop at ground in showup moment
     if (IsFreeFlying() || IsTaxiFlying())
         m_movementInfo.AddMovementFlag(MOVEFLAG_FLYING);
+
+    SendCurrencies();
 
     SetMover(this);
 }
@@ -21753,13 +21399,6 @@ bool Player::CanUseBattleGroundObject()
             !HasAura(SPELL_RECENTLY_DROPPED_FLAG, EFFECT_INDEX_0));
 }
 
-bool Player::CanUseCapturePoint()
-{
-    return (isAlive() &&                                    // living
-            !HasStealthAura() &&                            // not stealthed
-            !HasInvisibilityAura());                        // visible
-}
-
 uint32 Player::GetBarberShopCost(uint8 newhairstyle, uint8 newhaircolor, uint8 newfacialhair, uint32 newskintone)
 {
     uint32 level = getLevel();
@@ -21800,25 +21439,21 @@ uint32 Player::GetBarberShopCost(uint8 newhairstyle, uint8 newhaircolor, uint8 n
 
 void Player::InitGlyphsForLevel()
 {
-    for (uint32 i = 0; i < sGlyphSlotStore.GetNumRows(); ++i)
+    uint32 slot = 0;
+    for (uint32 i = 0; i < sGlyphSlotStore.GetNumRows() && slot < MAX_GLYPH_SLOT_INDEX; ++i)
         if (GlyphSlotEntry const* gs = sGlyphSlotStore.LookupEntry(i))
-            if (gs->Order)
-                SetGlyphSlot(gs->Order - 1, gs->Id);
+            SetGlyphSlot(slot++, gs->Id);
 
     uint32 level = getLevel();
     uint32 value = 0;
 
     // 0x3F = 0x01 | 0x02 | 0x04 | 0x08 | 0x10 | 0x20 for 80 level
-    if (level >= 15)
-        value |= (0x01 | 0x02);
-    if (level >= 30)
-        value |= 0x08;
+    if (level >= 25)
+        value |= 0x01 | 0x02 | 0x40;
     if (level >= 50)
-        value |= 0x04;
-    if (level >= 70)
-        value |= 0x10;
-    if (level >= 80)
-        value |= 0x20;
+        value |= 0x04 | 0x08 | 0x80;
+    if (level >= 75)
+        value |= 0x10 | 0x20 | 0x100;
 
     SetUInt32Value(PLAYER_GLYPHS_ENABLED, value);
 }
@@ -22083,10 +21718,30 @@ Item* Player::ConvertItem(Item* item, uint32 newItemId)
 
 uint32 Player::CalculateTalentsPoints() const
 {
-    uint32 base_level = getClass() == CLASS_DEATH_KNIGHT ? 55 : 9;
-    uint32 base_talent = getLevel() <= base_level ? 0 : getLevel() - base_level;
+    // this dbc file has entries only up to level 100
+    NumTalentsAtLevelEntry const* count = sNumTalentsAtLevelStore.LookupEntry(std::min<uint32>(getLevel(), 100));
+    if (!count)
+        return 0;
 
-    uint32 talentPointsForLevel = base_talent + m_questRewardTalentCount;
+    float baseForLevel = count->Talents;
+
+    if (getClass() != CLASS_DEATH_KNIGHT)
+        return uint32(baseForLevel * sWorld.getConfig(CONFIG_FLOAT_RATE_TALENT));
+
+    // Death Knight starting level
+    // hardcoded here - number of quest awarded talents is equal to number of talents any other class would have at level 55
+    if (getLevel() < 55)
+        return 0;
+
+    NumTalentsAtLevelEntry const* dkBase = sNumTalentsAtLevelStore.LookupEntry(55);
+    if (!dkBase)
+        return 0;
+
+    float talentPointsForLevel = count->Talents - dkBase->Talents;
+    talentPointsForLevel += float(m_questRewardTalentCount);
+
+    if (talentPointsForLevel > baseForLevel)
+        talentPointsForLevel = baseForLevel;
 
     return uint32(talentPointsForLevel * sWorld.getConfig(CONFIG_FLOAT_RATE_TALENT));
 }
@@ -22408,29 +22063,29 @@ SpellEntry const* Player::GetKnownTalentRankById(int32 talentId) const
         return NULL;
 }
 
-void Player::LearnTalent(uint32 talentId, uint32 talentRank)
+bool Player::LearnTalent(uint32 talentId, uint32 talentRank)
 {
     uint32 CurTalentPoints = GetFreeTalentPoints();
 
     if (CurTalentPoints == 0)
-        return;
+        return false;
 
     if (talentRank >= MAX_TALENT_RANK)
-        return;
+        return false;
 
     TalentEntry const* talentInfo = sTalentStore.LookupEntry(talentId);
 
     if (!talentInfo)
-        return;
+        return false;
 
     TalentTabEntry const* talentTabInfo = sTalentTabStore.LookupEntry(talentInfo->TalentTab);
 
     if (!talentTabInfo)
-        return;
+        return false;
 
     // prevent learn talent for different class (cheating)
     if ((getClassMask() & talentTabInfo->ClassMask) == 0)
-        return;
+        return false;
 
     // find current max talent rank
     uint32 curtalent_maxrank = 0;
@@ -22439,14 +22094,14 @@ void Player::LearnTalent(uint32 talentId, uint32 talentRank)
 
     // we already have same or higher talent rank learned
     if (curtalent_maxrank >= (talentRank + 1))
-        return;
+        return false;
 
     // check if we have enough talent points
     if (CurTalentPoints < (talentRank - curtalent_maxrank + 1))
-        return;
+        return false;
 
     // Check if it requires another talent
-    /*if (talentInfo->DependsOn > 0)
+    if (talentInfo->DependsOn > 0)
     {
         if (TalentEntry const* depTalentInfo = sTalentStore.LookupEntry(talentInfo->DependsOn))
         {
@@ -22460,40 +22115,75 @@ void Player::LearnTalent(uint32 talentId, uint32 talentRank)
             }
 
             if (!hasEnoughRank)
-                return;
+                return false;
         }
-    }*/
+    }
 
     // Find out how many points we have in this field
     uint32 spentPoints = 0;
 
+    uint32 primaryTreeTalents = 0;
     uint32 tTab = talentInfo->TalentTab;
-    if (talentInfo->Row > 0)
+    bool isMainTree = m_talentsPrimaryTree[m_activeSpec] == tTab || !m_talentsPrimaryTree[m_activeSpec];
+
+    if (talentInfo->Row > 0 || !isMainTree)
     {
-        for (PlayerTalentMap::const_iterator iter = m_talents[m_activeSpec].begin(); iter != m_talents[m_activeSpec].end(); ++iter)
-            if (iter->second.state != PLAYERSPELL_REMOVED && iter->second.talentEntry->TalentTab == tTab)
-                spentPoints += iter->second.currentRank + 1;
+        for (uint32 i = 0; i < sTalentStore.GetNumRows(); i++)              // Loop through all talents.
+        {
+            if (TalentEntry const* tmpTalent = sTalentStore.LookupEntry(i)) // Someday, someone needs to revamp the way talents are tracked
+            {
+                for (uint8 rank = 0; rank < MAX_TALENT_RANK; rank++)
+                {
+                    if (tmpTalent->RankID[rank] != 0)
+                    {
+                        if (HasSpell(tmpTalent->RankID[rank]))
+                        {
+                            if (tmpTalent->TalentTab == tTab)
+                                spentPoints += (rank + 1);
+                            if (tmpTalent->TalentTab == m_talentsPrimaryTree[m_activeSpec])
+                                primaryTreeTalents += (rank + 1);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // not have required min points spent in talent tree
     if (spentPoints < (talentInfo->Row * MAX_TALENT_RANK))
-        return;
+        return false;
+
+    // player has not spent 31 talents in main tree before attempting to learn other tree's talents
+    if (!isMainTree && primaryTreeTalents < REQ_PRIMARY_TREE_TALENTS)
+        return false;
 
     // spell not set in talent.dbc
     uint32 spellid = talentInfo->RankID[talentRank];
     if (spellid == 0)
     {
         sLog.outError("Talent.dbc have for talent: %u Rank: %u spell id = 0", talentId, talentRank);
-        return;
+        return false;
     }
 
     // already known
     if (HasSpell(spellid))
-        return;
+        return false;
 
     // learn! (other talent ranks will unlearned at learning)
     learnSpell(spellid, false);
     DETAIL_LOG("TalentID: %u Rank: %u Spell: %u\n", talentId, talentRank, spellid);
+
+    // set talent tree for player
+    if (!m_talentsPrimaryTree[m_activeSpec])
+    {
+        m_talentsPrimaryTree[m_activeSpec] = talentInfo->TalentTab;
+        std::vector<uint32> const* specSpells = GetTalentTreePrimarySpells(talentInfo->TalentTab);
+        if (specSpells)
+            for (size_t i = 0; i < specSpells->size(); ++i)
+                learnSpell(specSpells->at(i), false);
+    }
+
+    return true;
 }
 
 void Player::LearnPetTalent(ObjectGuid petGuid, uint32 talentId, uint32 talentRank)
@@ -22560,7 +22250,7 @@ void Player::LearnPetTalent(ObjectGuid petGuid, uint32 talentId, uint32 talentRa
         return;
 
     // Check if it requires another talent
-    /*if (talentInfo->DependsOn > 0)
+    if (talentInfo->DependsOn > 0)
     {
         if (TalentEntry const* depTalentInfo = sTalentStore.LookupEntry(talentInfo->DependsOn))
         {
@@ -22574,7 +22264,7 @@ void Player::LearnPetTalent(ObjectGuid petGuid, uint32 talentId, uint32 talentRa
             if (!hasEnoughRank)
                 return;
         }
-    }*/
+    }
 
     // Find out how many points we have in this field
     uint32 spentPoints = 0;
@@ -22625,17 +22315,6 @@ void Player::LearnPetTalent(ObjectGuid petGuid, uint32 talentId, uint32 talentRa
     // learn! (other talent ranks will unlearned at learning)
     pet->learnSpell(spellid);
     DETAIL_LOG("PetTalentID: %u Rank: %u Spell: %u\n", talentId, talentRank, spellid);
-}
-
-void Player::UpdateKnownCurrencies(uint32 itemId, bool apply)
-{
-    //if(CurrencyTypesEntry const* ctEntry = sCurrencyTypesStore.LookupEntry(itemId))
-    //{
-    //    if(apply)
-    //        SetFlag64(PLAYER_FIELD_KNOWN_CURRENCIES, (UI64LIT(1) << (ctEntry->BitIndex - 1)));
-    //    else
-    //        RemoveFlag64(PLAYER_FIELD_KNOWN_CURRENCIES, (UI64LIT(1) << (ctEntry->BitIndex - 1)));
-    //}
 }
 
 void Player::UpdateFallInformationIfNeed(MovementInfo const& minfo, uint16 opcode)
@@ -22696,9 +22375,13 @@ void Player::BuildPlayerTalentsInfoData(WorldPacket* data)
 
     if (m_specsCount)
     {
+        if (m_specsCount > MAX_TALENT_SPEC_COUNT)
+            m_specsCount = MAX_TALENT_SPEC_COUNT;
+
         // loop through all specs (only 1 for now)
         for (uint32 specIdx = 0; specIdx < m_specsCount; ++specIdx)
         {
+            *data << uint32(m_talentsPrimaryTree[specIdx]);
             uint8 talentIdCount = 0;
             size_t pos = data->wpos();
             *data << uint8(talentIdCount);                  // [PH], talentIdCount
@@ -22706,7 +22389,7 @@ void Player::BuildPlayerTalentsInfoData(WorldPacket* data)
             // find class talent tabs (all players have 3 talent tabs)
             uint32 const* talentTabIds = GetTalentTabPages(getClass());
 
-            for (uint32 i = 0; i < 3; ++i)
+            for (uint32 i = 0; i < MAX_TALENT_TABS; ++i)
             {
                 uint32 talentTabId = talentTabIds[i];
                 for (PlayerTalentMap::iterator iter = m_talents[specIdx].begin(); iter != m_talents[specIdx].end(); ++iter)
@@ -23065,6 +22748,15 @@ void Player::ActivateSpec(uint8 specNum)
     // prevent deletion of action buttons by client at spell unlearn or by player while spec change in progress
     SendLockActionButtons();
 
+    // Remove spec specific spells
+    for (uint32 i = 0; i < MAX_TALENT_TABS; ++i)
+    {
+        std::vector<uint32> const* specSpells = GetTalentTreePrimarySpells(GetTalentTabPages(getClass())[i]);
+        if (specSpells)
+            for (size_t i = 0; i < specSpells->size(); ++i)
+                removeSpell(specSpells->at(i), true);
+    }
+
     ApplyGlyphs(false);
 
     // copy of new talent spec (we will use it as model for converting current tlanet state to new)
@@ -23167,6 +22859,11 @@ void Player::ActivateSpec(uint8 specNum)
 
     ResummonPetTemporaryUnSummonedIfAny();
 
+    std::vector<uint32> const* specSpells = GetTalentTreePrimarySpells(m_talentsPrimaryTree[m_activeSpec]);
+    if (specSpells)
+        for (size_t i = 0; i < specSpells->size(); ++i)
+            learnSpell(specSpells->at(i), false);
+
     ApplyGlyphs(true);
 
     SendInitialActionButtons();
@@ -23176,6 +22873,9 @@ void Player::ActivateSpec(uint8 specNum)
         SetPower(POWER_MANA, 0);
 
     SetPower(pw, 0);
+
+    if (!sTalentTabStore.LookupEntry(m_talentsPrimaryTree[m_activeSpec]))
+        resetTalents(true);
 }
 
 void Player::UpdateSpecCount(uint8 count)
@@ -23562,4 +23262,296 @@ void Player::_fillGearScoreData(Item* item, GearScoreVec* gearScore, uint32& two
         default:
             break;
     }
+}
+
+void Player::SendCurrencies() const
+{
+    WorldPacket data(SMSG_SEND_CURRENCIES, m_currencies.size() * 4);
+    data.WriteBits(m_currencies.size(), 23);
+
+    for (PlayerCurrenciesMap::const_iterator itr = m_currencies.begin(); itr != m_currencies.end(); ++itr)
+    {
+        uint32 weekCap = GetCurrencyWeekCap(itr->second.currencyEntry);
+        data.WriteBit(weekCap && itr->second.weekCount);
+        data.WriteBits(itr->second.flags, 4);
+        data.WriteBit(weekCap);
+        data.WriteBit(itr->second.currencyEntry->HasSeasonCount());
+    }
+
+    for (PlayerCurrenciesMap::const_iterator itr = m_currencies.begin(); itr != m_currencies.end(); ++itr)
+    {
+        data << uint32(floor(itr->second.totalCount / itr->second.currencyEntry->GetPrecision()));
+
+        uint32 weekCap = GetCurrencyWeekCap(itr->second.currencyEntry);
+        if (weekCap)
+            data << uint32(floor(weekCap / itr->second.currencyEntry->GetPrecision()));
+        if (itr->second.currencyEntry->HasSeasonCount())
+            data << uint32(floor(itr->second.seasonCount / itr->second.currencyEntry->GetPrecision()));
+        data << uint32(itr->first);
+        if (weekCap && itr->second.weekCount)
+            data << uint32(floor(itr->second.weekCount / itr->second.currencyEntry->GetPrecision()));
+    }
+
+    GetSession()->SendPacket(&data);
+}
+
+uint32 Player::GetCurrencyWeekCap(CurrencyTypesEntry const * currency) const
+{
+    uint32 cap = currency->WeekCap;
+    switch (currency->ID)
+    {
+        case CURRENCY_CONQUEST_POINTS:
+            cap = sWorld.getConfig(CONFIG_UINT32_CURRENCY_CONQUEST_POINTS_DEFAULT_WEEK_CAP);
+            break;
+    }
+
+    return cap;
+}
+
+void Player::SendCurrencyWeekCap(uint32 id) const
+{
+    SendCurrencyWeekCap(sCurrencyTypesStore.LookupEntry(id));
+}
+
+void Player::SendCurrencyWeekCap(CurrencyTypesEntry const * currency) const
+{
+    if (!currency || !IsInWorld() || GetSession()->PlayerLoading())
+        return;
+
+    uint32 cap = GetCurrencyWeekCap(currency);
+    if (!cap)
+        return;
+
+    WorldPacket packet(SMSG_SET_CURRENCY_WEEK_LIMIT, 8);
+    packet << uint32(floor(cap / currency->GetPrecision()));
+    packet << uint32(currency->ID);
+    GetSession()->SendPacket(&packet);
+}
+
+uint32 Player::GetCurrencyTotalCap(CurrencyTypesEntry const* currency) const
+{
+    uint32 cap = currency->TotalCap;
+
+    return cap;
+}
+
+uint32 Player::GetCurrencyCount(uint32 id) const
+{
+    PlayerCurrenciesMap::const_iterator itr = m_currencies.find(id);
+    return itr != m_currencies.end() ? itr->second.totalCount : 0;
+}
+
+uint32 Player::GetCurrencySeasonCount(uint32 id) const
+{
+    PlayerCurrenciesMap::const_iterator itr = m_currencies.find(id);
+    return itr != m_currencies.end() ? itr->second.seasonCount : 0;
+}
+
+uint32 Player::GetCurrencyWeekCount(uint32 id) const
+{
+    PlayerCurrenciesMap::const_iterator itr = m_currencies.find(id);
+    return itr != m_currencies.end() ? itr->second.weekCount : 0;
+}
+
+void Player::ModifyCurrencyCount(uint32 id, int32 count, bool modifyWeek, bool modifySeason)
+{
+    if (!count)
+        return;
+
+    CurrencyTypesEntry const * currency = NULL;
+
+    int32 oldTotalCount = 0;
+    int32 oldWeekCount = 0;
+    PlayerCurrenciesMap::iterator itr = m_currencies.find(id);
+
+    bool initWeek = false;
+    if (itr == m_currencies.end())
+    {
+        currency = sCurrencyTypesStore.LookupEntry(id);
+        MANGOS_ASSERT(currency);
+
+        PlayerCurrency cur;
+        cur.state = PLAYERCURRENCY_NEW;
+        cur.totalCount = 0;
+        cur.weekCount = 0;
+        cur.seasonCount = 0;
+        cur.flags = 0;
+        cur.currencyEntry = currency;
+        m_currencies[id] = cur;
+        initWeek = true;
+        itr = m_currencies.find(id);
+    }
+    else
+    {
+        oldTotalCount = itr->second.totalCount;
+        oldWeekCount = itr->second.weekCount;
+        currency = itr->second.currencyEntry;
+    }
+
+    int32 newTotalCount = oldTotalCount + count;
+    if (newTotalCount < 0)
+        newTotalCount = 0;
+
+    int32 newWeekCount = oldWeekCount + (modifyWeek && count > 0 ? count : 0);
+    if (newWeekCount < 0)
+        newWeekCount = 0;
+
+    int32 totalCap = GetCurrencyTotalCap(currency);
+    if (totalCap && int32(totalCap) < newTotalCount)
+    {
+        int32 delta = newTotalCount - totalCap;
+        newTotalCount = totalCap;
+        newWeekCount -= delta;
+    }
+
+    int32 weekCap = GetCurrencyWeekCap(currency);
+    if (modifyWeek && weekCap && newWeekCount > weekCap)
+    {
+        int32 delta = newWeekCount - weekCap;
+        newWeekCount = weekCap;
+        newTotalCount -= delta;
+    }
+    initWeek &= weekCap != currency->WeekCap;
+
+    if (newTotalCount != oldTotalCount)
+    {
+        if (itr->second.state != PLAYERCURRENCY_NEW)
+            itr->second.state = PLAYERCURRENCY_CHANGED;
+
+        itr->second.totalCount = newTotalCount;
+        itr->second.weekCount = newWeekCount;
+
+        int32 diff = newTotalCount - oldTotalCount;
+        if (diff > 0 && modifySeason)
+            itr->second.seasonCount += diff;
+
+        // probably excessive checks
+        if (IsInWorld() && !GetSession()->PlayerLoading())
+        {
+            if (diff > 0)
+                UpdateAchievementCriteria(ACHIEVEMENT_CRITERIA_TYPE_CURRENCY_EARNED, id, newTotalCount);
+
+            WorldPacket packet(SMSG_SET_CURRENCY, 13);
+            bool bit0 = modifyWeek && weekCap && diff > 0;
+            bool bit1 = currency->HasSeasonCount();
+            bool bit2 = currency->ID == CURRENCY_CONQUEST_ARENA_META || currency->ID == CURRENCY_CONQUEST_BG_META; // hides message in client when set
+            packet.WriteBit(bit0);
+            packet.WriteBit(bit1);
+            packet.WriteBit(bit2);
+
+            if (bit1)
+                packet << uint32(floor(itr->second.seasonCount / currency->GetPrecision()));
+            packet << uint32(floor(newTotalCount / currency->GetPrecision()));
+            packet << uint32(id);
+            if (bit0)
+                packet << uint32(floor(newWeekCount / currency->GetPrecision()));
+            GetSession()->SendPacket(&packet);
+
+            // init currency week limit for new currencies
+            if (initWeek)
+                SendCurrencyWeekCap(currency);
+        }
+
+        if (itr->first == CURRENCY_CONQUEST_ARENA_META || itr->first == CURRENCY_CONQUEST_BG_META)
+            ModifyCurrencyCount(CURRENCY_CONQUEST_POINTS, diff, modifyWeek);
+    }
+}
+
+void Player::SetCurrencyCount(uint32 id, uint32 count)
+{
+    ModifyCurrencyCount(id, int32(count) - GetCurrencyCount(id));
+}
+
+void Player::_LoadCurrencies(QueryResult* result)
+{
+    //         0   1           2          4            5
+    // "SELECT id, totalCount, weekCount, seasonCount, flags FROM character_currencies WHERE guid = '%u'"
+
+    if (result)
+    {
+        do
+        {
+            Field* fields = result->Fetch();
+
+            uint32 currency_id = fields[0].GetUInt16();
+            uint32 totalCount  = fields[1].GetUInt32();
+            uint32 weekCount   = fields[2].GetUInt32();
+            uint32 seasonCount = fields[3].GetUInt32();
+            uint8 flags        = fields[4].GetUInt8();
+
+            CurrencyTypesEntry const * entry = sCurrencyTypesStore.LookupEntry(currency_id);
+            if (!entry)
+            {
+                sLog.outError("Player::_LoadCurrencies: %s has not existing currency id %u, removing.", GetGuidStr().c_str(), currency_id);
+                CharacterDatabase.PExecute("DELETE FROM character_currencies WHERE id = '%u'", currency_id);
+                continue;
+            }
+
+            uint32 weekCap = GetCurrencyWeekCap(entry);
+            uint32 totalCap = GetCurrencyTotalCap(entry);
+
+            PlayerCurrency cur;
+
+            cur.state = PLAYERCURRENCY_UNCHANGED;
+
+            if (totalCap && totalCount > totalCap)
+                cur.totalCount = totalCap;
+            else
+                cur.totalCount = totalCount;
+
+            if (weekCap && weekCount > weekCap)
+                cur.weekCount = weekCap;
+            else
+                cur.weekCount = weekCount;
+
+            cur.seasonCount = seasonCount;
+
+            cur.flags = flags & PLAYERCURRENCY_MASK_USED_BY_CLIENT;
+            cur.currencyEntry = entry;
+
+            m_currencies[currency_id] = cur;
+        }
+        while (result->NextRow());
+    }
+}
+
+void Player::_SaveCurrencies()
+{
+    for (PlayerCurrenciesMap::iterator itr = m_currencies.begin(); itr != m_currencies.end();)
+    {
+        if (itr->second.state == PLAYERCURRENCY_CHANGED)
+            CharacterDatabase.PExecute("UPDATE `character_currencies` SET `totalCount` = '%u', `weekCount` = '%u', `seasonCount` = '%u', `flags` = '%u' WHERE `guid` = '%u' AND `id` = '%u'", itr->second.totalCount, itr->second.weekCount, itr->second.seasonCount, itr->second.flags, GetGUIDLow(), itr->first);
+        else if (itr->second.state == PLAYERCURRENCY_NEW)
+            CharacterDatabase.PExecute("INSERT INTO `character_currencies` (`guid`, `id`, `totalCount`, `weekCount`, `seasonCount`, `flags`) VALUES ('%u', '%u', '%u', '%u', '%u', '%u')", GetGUIDLow(), itr->first, itr->second.totalCount, itr->second.weekCount, itr->second.seasonCount, itr->second.flags);
+
+        if (itr->second.state == PLAYERCURRENCY_REMOVED)
+            m_currencies.erase(itr++);
+        else
+        {
+            itr->second.state = PLAYERCURRENCY_UNCHANGED;
+            ++itr;
+        }
+    }
+}
+
+void Player::SetCurrencyFlags(uint32 currencyId, uint8 flags)
+{
+    PlayerCurrenciesMap::iterator itr = m_currencies.find(currencyId);
+    if (itr == m_currencies.end())
+        return;
+
+    itr->second.flags = flags;
+    itr->second.state = PLAYERCURRENCY_CHANGED;
+}
+
+void Player::ResetCurrencyWeekCounts()
+{
+    for (PlayerCurrenciesMap::iterator itr = m_currencies.begin(); itr != m_currencies.end(); ++itr)
+    {
+        itr->second.weekCount = 0;
+        itr->second.state = PLAYERCURRENCY_CHANGED;
+    }
+
+    WorldPacket data(SMSG_WEEKLY_RESET_CURRENCIES, 0);
+    SendDirectMessage(&data);
 }

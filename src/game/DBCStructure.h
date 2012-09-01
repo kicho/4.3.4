@@ -133,6 +133,13 @@ struct AchievementCriteriaEntry
             uint32  questCount;                             // 4
         } complete_quests_in_zone;
 
+        // ACHIEVEMENT_CRITERIA_TYPE_CURRENCY_EARNED         = 12
+        struct
+        {
+            uint32 currencyId;                              // 3
+            uint32 count;                                   // 4
+        } currencyEarned;
+
         // ACHIEVEMENT_CRITERIA_TYPE_COMPLETE_DAILY_QUEST   = 14
         struct
         {
@@ -810,20 +817,20 @@ struct CreatureTypeEntry
 struct CurrencyTypesEntry
 {
     uint32  ID;                                             // 0
-    //uint32 Category;                                        // 1
+    //uint32 Category;                                      // 1
     DBCString name;                                         // 2
-    //char* iconName;                                         // 3
-    //uint32 unk4;                                            // 4
-    //uint32 unk5;                                            // 5
-    //uint32 unk6;                                            // 6
-    uint32 TotalCount;                                      // 7
-    uint32 WeekCount;                                       // 8
+    //char* iconName;                                       // 3
+    //char* iconName2;                                      // 4
+    //uint32 unk5;                                          // 5
+    //uint32 unk6;                                          // 6
+    uint32 TotalCap;                                        // 7
+    uint32 WeekCap;                                         // 8
     uint32 Flags;                                           // 9
-    //DBCString description;                                  // 10
+    //DBCString description;                                // 10
 
-    bool HasPrecision() const { return Flags & CURRENCY_FLAG_HAS_PRECISION; }
+    bool HasPrecision() const   { return Flags & CURRENCY_FLAG_HAS_PRECISION; }
     bool HasSeasonCount() const { return Flags & CURRENCY_FLAG_HAS_SEASON_COUNT; }
-    float GetPrecision() const { return HasPrecision() ? CURRENCY_PRECISION : 1.0f; }
+    float GetPrecision() const  { return HasPrecision() ? CURRENCY_PRECISION : 1.0f; }
 };
 
 struct DungeonEncounterEntry
@@ -1337,6 +1344,12 @@ struct MovieEntry
     //char*       filename;                                 // 1        m_filename
     //uint32      unk1;                                     // 2        m_volume
     //uint32      unk2;                                     // 3 4.0.0
+};
+
+struct NumTalentsAtLevelEntry
+{
+    //uint32 Level;                                         // 0 index
+    float Talents;                                          // 1 talent count
 };
 
 #define MAX_OVERRIDE_SPELLS     10
@@ -2115,8 +2128,9 @@ struct SummonPropertiesEntry
     uint32  Flags;                                          // 5        m_flags (enum SummonPropFlags)
 };
 
-#define MAX_TALENT_RANK 3
+#define MAX_TALENT_RANK 5
 #define MAX_PET_TALENT_RANK 3                               // use in calculations, expected <= MAX_TALENT_RANK
+#define MAX_TALENT_TABS 3
 
 struct TalentEntry
 {
@@ -2125,11 +2139,13 @@ struct TalentEntry
     uint32    Row;                                          // 2        m_tierID
     uint32    Col;                                          // 3        m_columnIndex
     uint32    RankID[MAX_TALENT_RANK];                      // 4-6      m_spellRank
-    uint32    DependsOn[MAX_TALENT_RANK];                   // 9-11     m_prereqTalent (Talent.dbc)                                                            // 
-    uint8     DependsOnRank[MAX_TALENT_RANK];               // 11-13    part of prev field                                                          // 
-    uint8     needAddInSpellBook;                           // 14       m_flags also need disable higest ranks on reset talent tree
-    uint32    unk1;                                         // 15       m_requiredSpellID
-    //uint64  allowForPet;                                  // 16       m_categoryMask its a 64 bit mask for pet 1<<m_categoryEnumID in CreatureFamily.dbc
+    uint32    DependsOn;                                    // 9        m_prereqTalent (Talent.dbc)
+                                                            // 10-11 part of prev field
+    uint32    DependsOnRank;                                // 12       m_prereqRank
+                                                            // 13-14 part of prev field
+    //uint32  needAddInSpellBook;                           // 15       m_flags also need disable higest ranks on reset talent tree
+    //uint32  unk1;                                         // 16       m_requiredSpellID
+    //uint64  allowForPet;                                  // 17       m_categoryMask its a 64 bit mask for pet 1<<m_categoryEnumID in CreatureFamily.dbc
 };
 
 struct TalentTabEntry
@@ -2142,8 +2158,16 @@ struct TalentTabEntry
     uint32  tabpage;                                        // 5        m_orderIndex
     //char* internalname;                                   // 6        m_backgroundFile
     //char* description;                                    // 7
-    //uint32 rolesMask;                                     // 8 4.0.0
-    //uint32 spellIds[2];                                   // 9-10 passive mastery bonus spells?
+    //uint32 rolesMask;                                     // 8        4.0.0
+    uint32 masterySpells[2];                                // 9-10     passive mastery bonus spells
+};
+
+struct TalentTreePrimarySpellsEntry
+{
+    //uint32 Id;                                            // 0 index
+    uint32 TalentTree;                                      // 1 entry from TalentTab.dbc
+    uint32 SpellId;                                         // 2 spell id to learn
+    //uint32 Flags;                                         // 3 some kind of flags
 };
 
 struct TaxiNodesEntry

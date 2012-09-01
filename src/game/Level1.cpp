@@ -177,8 +177,10 @@ bool ChatHandler::HandleNotifyCommand(char* args)
     std::string str = GetMangosString(LANG_GLOBAL_NOTIFY);
     str += args;
 
-    WorldPacket data(SMSG_NOTIFICATION, (str.size() + 1));
-    data << str;
+    WorldPacket data(SMSG_NOTIFICATION, str.size() + 1);
+    data.WriteBits(str.length(), 13);
+    data.FlushBits();
+    data.append(str.c_str(), str.length());
     sWorld.SendGlobalMessage(&data);
 
     return true;
@@ -1595,32 +1597,6 @@ bool ChatHandler::HandleModifyMoneyCommand(char* args)
     }
 
     DETAIL_LOG(GetMangosString(LANG_NEW_MONEY), moneyuser, addmoney, chr->GetMoney());
-
-    return true;
-}
-
-bool ChatHandler::HandleModifyHonorCommand(char* args)
-{
-    if (!*args)
-        return false;
-
-    Player* target = getSelectedPlayer();
-    if (!target)
-    {
-        SendSysMessage(LANG_PLAYER_NOT_FOUND);
-        SetSentErrorMessage(true);
-        return false;
-    }
-
-    // check online security
-    if (HasLowerSecurity(target))
-        return false;
-
-    int32 amount = (int32)atoi(args);
-
-    target->ModifyHonorPoints(amount);
-
-    PSendSysMessage(LANG_COMMAND_MODIFY_HONOR, GetNameLink(target).c_str(), target->GetHonorPoints());
 
     return true;
 }

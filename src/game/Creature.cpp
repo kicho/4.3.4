@@ -39,7 +39,7 @@
 #include "WaypointMovementGenerator.h"
 #include "InstanceData.h"
 #include "MapPersistentStateMgr.h"
-#include "BattleGroundMgr.h"
+#include "BattleGround/BattleGroundMgr.h"
 #include "OutdoorPvP/OutdoorPvP.h"
 #include "Spell.h"
 #include "Util.h"
@@ -156,15 +156,17 @@ bool CreatureCreatePos::Relocate(Creature* cr) const
     return true;
 }
 
-Creature::Creature(CreatureSubtype subtype) :
-    Unit(), i_AI(NULL),
-    lootForPickPocketed(false), lootForBody(false), lootForSkin(false), m_groupLootTimer(0), m_groupLootId(0),
+Creature::Creature(CreatureSubtype subtype) : Unit(),
+    i_AI(NULL),
+    lootForPickPocketed(false), lootForBody(false), lootForSkin(false),
+    m_groupLootTimer(0), m_groupLootId(0),
     m_lootMoney(0), m_lootGroupRecipientId(0),
     m_corpseDecayTimer(0), m_respawnTime(0), m_respawnDelay(25), m_corpseDelay(60), m_respawnradius(5.0f),
     m_subtype(subtype), m_defaultMovementType(IDLE_MOTION_TYPE), m_equipmentId(0),
     m_AlreadyCallAssistance(false), m_AlreadySearchedAssistance(false),
     m_regenHealth(true), m_AI_locked(false), m_isDeadByDefault(false),
-    m_meleeDamageSchoolMask(SPELL_SCHOOL_MASK_NORMAL), m_originalEntry(0), m_temporaryFactionFlags(TEMPFACTION_NONE),
+    m_temporaryFactionFlags(TEMPFACTION_NONE),
+    m_meleeDamageSchoolMask(SPELL_SCHOOL_MASK_NORMAL), m_originalEntry(0),
     m_creatureInfo(NULL)
 {
     m_regenTimer = 200;
@@ -750,15 +752,15 @@ bool Creature::Create(uint32 guidlow, CreatureCreatePos& cPos, CreatureInfo cons
     if (!cPos.Relocate(this))
         return false;
 
+    // Notify the outdoor pvp script
+    if (OutdoorPvP* outdoorPvP = sOutdoorPvPMgr.GetScript(GetZoneId()))
+        outdoorPvP->HandleCreatureCreate(this);
+
     // Notify the map's instance data.
     // Only works if you create the object in it, not if it is moves to that map.
     // Normally non-players do not teleport to other maps.
     if (InstanceData* iData = GetMap()->GetInstanceData())
         iData->OnCreatureCreate(this);
-
-    // Notify the outdoor pvp script
-    if (OutdoorPvP* outdoorPvP = sOutdoorPvPMgr.GetScript(GetZoneId()))
-        outdoorPvP->HandleCreatureCreate(this);
 
     switch (GetCreatureInfo()->rank)
     {
@@ -2109,7 +2111,7 @@ Unit* Creature::SelectAttackingTarget(AttackingTarget target, uint32 position, S
             std::vector<Unit*> suitableUnits;
             suitableUnits.reserve(threatlist.size() - position);
             advance(itr, position);
-            for (itr; itr != threatlist.end(); ++itr)
+            for (; itr != threatlist.end(); ++itr)
                 if (Unit* pTarget = GetMap()->GetUnit((*itr)->getUnitGuid()))
                     if (!selectFlags || MeetsSelectAttackingRequirement(pTarget, pSpellInfo, selectFlags))
                         suitableUnits.push_back(pTarget);
@@ -2122,7 +2124,7 @@ Unit* Creature::SelectAttackingTarget(AttackingTarget target, uint32 position, S
         case ATTACKING_TARGET_TOPAGGRO:
         {
             advance(itr, position);
-            for (itr; itr != threatlist.end(); ++itr)
+            for (; itr != threatlist.end(); ++itr)
                 if (Unit* pTarget = GetMap()->GetUnit((*itr)->getUnitGuid()))
                     if (!selectFlags || MeetsSelectAttackingRequirement(pTarget, pSpellInfo, selectFlags))
                         return pTarget;
@@ -2132,7 +2134,7 @@ Unit* Creature::SelectAttackingTarget(AttackingTarget target, uint32 position, S
         case ATTACKING_TARGET_BOTTOMAGGRO:
         {
             advance(ritr, position);
-            for (ritr; ritr != threatlist.rend(); ++ritr)
+            for (; ritr != threatlist.rend(); ++ritr)
                 if (Unit* pTarget = GetMap()->GetUnit((*itr)->getUnitGuid()))
                     if (!selectFlags || MeetsSelectAttackingRequirement(pTarget, pSpellInfo, selectFlags))
                         return pTarget;
